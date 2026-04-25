@@ -108,10 +108,23 @@ class TestCloudctlSkillCommands:
             assert context.organization == "myorg"
 
     @pytest.mark.asyncio
-    async def test_switch_context(self, skill: CloudctlSkill) -> None:
+    async def test_switch_context(self, skill: CloudctlSkill, mock_context: CloudContext) -> None:
         """Test switching context."""
+        context_json = {
+            "provider": "aws",
+            "organization": "myorg",
+            "account_id": "123456789",
+            "role": "admin",
+            "region": "us-east-1",
+        }
+
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
-            mock_exec.return_value = MagicMock(success=True, return_code=0)
+            # First call for switch command
+            # Second call for context verification
+            mock_exec.side_effect = [
+                MagicMock(success=True, return_code=0),
+                MagicMock(success=True, stdout=json.dumps(context_json)),
+            ]
 
             result = await skill.switch_context("myorg", "123456789", "admin")
             assert result.success is True
