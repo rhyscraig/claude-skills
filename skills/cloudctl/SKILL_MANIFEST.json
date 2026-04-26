@@ -1,0 +1,143 @@
+{
+  "name": "cloudctl",
+  "displayName": "Cloud Context & Operations Skill",
+  "version": "1.2.0",
+  "description": "Enterprise-grade multi-cloud context management and operations across AWS, Azure, and GCP using the cloudctl CLI",
+  "author": "Craig Hoad",
+  "license": "MIT",
+  "repository": "https://github.com/rhyscraig/claude-skills",
+  "homepage": "https://github.com/rhyscraig/claude-skills/tree/master/skills/cloudctl",
+  "keywords": [
+    "cloud",
+    "context-switching",
+    "aws",
+    "gcp",
+    "azure",
+    "multi-cloud",
+    "iam",
+    "credentials",
+    "sso",
+    "authentication",
+    "enterprise"
+  ],
+  "capabilities": [
+    "context-switching",
+    "organization-management",
+    "credential-validation",
+    "token-management",
+    "health-diagnostics",
+    "audit-logging",
+    "auto-recovery",
+    "multi-provider-support"
+  ],
+  "supportedProviders": [
+    "aws",
+    "gcp",
+    "azure"
+  ],
+  "requiredEnvironment": [
+    "CLOUDCTL_PATH"
+  ],
+  "optionalEnvironment": [
+    "CLOUDCTL_TIMEOUT",
+    "CLOUDCTL_RETRIES",
+    "CLOUDCTL_VERIFY",
+    "CLOUDCTL_AUDIT",
+    "CLOUDCTL_DRY_RUN"
+  ],
+  "configuration": {
+    "type": "file",
+    "fileName": ".cloudctl.yaml",
+    "allowLocal": true,
+    "allowCentral": true,
+    "example": ".cloudctl.example.yaml"
+  },
+  "entryPoints": {
+    "skill": "skills.cloudctl:CloudctlSkill"
+  },
+  "dependencies": {
+    "pydantic": "^2.5.0",
+    "rich": "^14.3.0",
+    "pyyaml": "^6.0.2"
+  },
+  "capabilities_detailed": {
+    "context-switching": {
+      "description": "Switch cloud context across multiple organizations and providers",
+      "methods": ["switch_context", "switch_region", "switch_project"],
+      "supported_providers": ["aws", "gcp", "azure"]
+    },
+    "organization-management": {
+      "description": "Manage and list configured organizations",
+      "methods": ["list_organizations", "list_accounts", "get_context"],
+      "features": ["multi-cloud-support", "organization-discovery"]
+    },
+    "credential-validation": {
+      "description": "Verify credentials and token validity across all organizations",
+      "methods": ["verify_credentials", "get_token_status", "check_all_credentials"],
+      "features": ["token-expiry-detection", "auto-refresh"]
+    },
+    "token-management": {
+      "description": "Handle token lifecycle and expiration",
+      "methods": ["load_token", "get_token_expiry", "auto-refresh-on-expiry"],
+      "features": ["proactive-refresh", "error-recovery"]
+    },
+    "health-diagnostics": {
+      "description": "Comprehensive health checks and system diagnostics",
+      "methods": ["health_check", "validate_switch"],
+      "features": ["dependency-checking", "credential-validation", "access-testing"]
+    },
+    "audit-logging": {
+      "description": "Comprehensive audit trail of all operations",
+      "methods": ["log_operation", "get_operation_log"],
+      "format": "JSONL",
+      "location": "~/.config/cloudctl/audit"
+    },
+    "auto-recovery": {
+      "description": "Automatic error recovery and retry logic",
+      "features": ["token-refresh-on-expiry", "context-validation", "max-retries-with-backoff"]
+    }
+  },
+  "errorHandling": {
+    "strategy": "comprehensive",
+    "features": [
+      "detailed-error-messages",
+      "helpful-suggestions",
+      "auto-retry-on-transient-errors",
+      "token-refresh-on-expiry",
+      "context-validation",
+      "timeout-handling"
+    ]
+  },
+  "performance": {
+    "contextCaching": true,
+    "asyncSupport": true,
+    "timeout": "30 seconds (configurable)",
+    "retries": "3 (configurable with backoff)"
+  },
+  "testing": {
+    "coverage": ">85%",
+    "categories": ["unit", "integration", "security"],
+    "notes": "See tests/ directory for comprehensive test suite"
+  },
+  "quality": {
+    "typeHints": true,
+    "docstrings": true,
+    "errorHandling": "comprehensive",
+    "logging": "optional-structured",
+    "auditLogging": true,
+    "validation": "pydantic-v2"
+  },
+  "releaseNotes": {
+    "version": "1.2.0",
+    "date": "2026-04-26",
+    "changes": [
+      "Enhanced GCP authentication with pre-flight checks",
+      "Improved error messages with helpful suggestions",
+      "Auto-token-refresh on expiry",
+      "Comprehensive health check diagnostics",
+      "Async/await throughout",
+      "Context caching for performance",
+      "Audit logging to JSONL format"
+    ]
+  }
+}

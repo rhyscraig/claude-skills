@@ -2,241 +2,237 @@
 
 ## Overview
 
-The Confluence Documentation Skill is a center-of-excellence implementation for intelligent document management, generation, and maintenance in Confluence. It emphasizes safety, quality, and prevention of duplicate documentation.
+The Confluence skill is an enterprise-grade documentation system that integrates with Atlassian Confluence Cloud and Jira. It demonstrates best practices for Claude skill development including:
 
-## Design Principles
+- Clear separation of concerns
+- Input validation at all boundaries
+- Comprehensive error handling
+- Configuration merging (central + local)
+- Optional graceful degradation (Jira)
+- Rate limiting and caching
+- MCP (Model Context Protocol) integration
 
-1. **Safety First**: Dry-run mode by default, explicit approval gates, comprehensive validation
-2. **Configuration-Driven**: All behavior controlled via YAML config, not hardcoded
-3. **Quality Gates**: Validation at every step, guardrails prevent mistakes
-4. **Smart Merging**: Detects existing docs, intelligent merge strategies, prevents duplicates
-5. **Code-Aware**: Analyzes repositories to extract relevant information
-6. **Template System**: Different documentation types with domain-specific generators
-7. **Audit Trail**: Full tracking of all changes, who made them, when
+## Core Components
 
-## Architecture Layers
+### 1. ConfluenceClient (`confluence_client.py`)
 
-### 1. Configuration Layer (`models.py`)
-- **SkillConfig**: Main configuration container
-- **ConfluenceConfig**: Confluence instance settings
-- **DocumentationConfig**: Doc generation settings
-- **CodeAnalysisConfig**: Code scanning rules
-- **GuardrailsConfig**: Safety and validation rules
-- **DocumentMetadata**: Per-document metadata
+**Responsibility**: Low-level Confluence Cloud API interaction
 
-Validation is performed via Pydantic models with JSON schema support.
+**Key Features**:
+- HTTP session management with retry strategy
+- Rate limiting (60 req/min, configurable)
+- Page and permission caching
+- Safe archive-instead-of-delete operations
+- Input validation via InputValidator class
 
-### 2. API Layer (`confluence_client.py`)
-- **ConfluenceClient**: Thin wrapper around Confluence Cloud API v2
-- Features:
-  - Rate limiting (token bucket algorithm)
-  - Automatic retries for transient failures
-  - Session caching for performance
-  - Permission checking before operations
-  - Page/link existence validation
+**Design Patterns**:
+- Stateless utility methods (InputValidator)
+- Rate limiter token bucket algorithm
+- Cache invalidation on mutations
+- HTTP error handling and user feedback
 
-### 3. Code Analysis Layer (`code_scanner.py`)
-- **CodeScanner**: Analyzes repositories to extract documentation-relevant info
-- Extraction types:
-  - **APIs**: REST endpoints, routes, methods
-  - **Architecture**: File structure, module organization
-  - **Dependencies**: Package/dependency manifests
-  - **Classes**: Class definitions and methods (Python)
-  - **Functions**: Function definitions (Python)
-  - **Config**: Configuration files
-  - **Errors**: Error/exception definitions
-  - **Examples**: Code examples
+### 2. ConfluenceSkill (`skill.py`)
 
-- Language support: Python, TypeScript/JavaScript, Go
-- Uses AST parsing for accuracy, regex for cross-language matching
+**Responsibility**: High-level workflow orchestration
 
-### 4. Document Generation Layer (`doc_generators.py`)
-- **DocGenerator** (abstract base class)
-- Concrete implementations:
-  - **APIDocGenerator**: For API specifications
-  - **ArchitectureDocGenerator**: For architecture/design docs
-  - **RunbookDocGenerator**: For operational procedures
-  - **ADRDocGenerator**: For architecture decision records
-  - **FeatureDocGenerator**: For feature specifications
-  - **InfrastructureDocGenerator**: For infrastructure docs
-  - **TroubleshootingDocGenerator**: For troubleshooting guides
-  - **CustomDocGenerator**: For custom/untyped docs
+**Key Features**:
+- Multi-step document generation pipeline
+- Configuration validation (fail-fast)
+- Dry-run mode for safety
+- Approval gates for production changes
+- Metadata and content generation
+- Jira integration (optional)
 
-- All generators:
-  - Produce Confluence storage format HTML
-  - Include metadata sections automatically
-  - Support extracted code information
-  - Follow template best practices
+**Design Patterns**:
+- Configuration merging strategy
+- Try/catch with structured error reporting
+- Progress logging with rich output
+- Result objects with status tracking
 
-### 5. Validation Layer (`guardrails.py`)
-- **GuardailValidator**: Comprehensive validation engine
-  - Metadata validation (required fields, deprecated terms)
-  - Content validation (size, links, formatting)
-  - Link validation (anchors, external URLs)
-  - Accessibility checks
+### 3. Configuration (`models.py`)
 
-- **ApprovalGate**: Manages user approval for changes
-  - Configurable requirement for approval
-  - Interactive and non-interactive modes
-  - Caching of approvals
+**Responsibility**: Configuration validation and schema
 
-### 6. Orchestration Layer (`skill.py`)
-- **ConfluenceSkill**: Main entry point
-  - Coordinates all components
-  - Manages workflow: scan → validate → generate → check → write
-  - Handles error cases gracefully
-  - Produces detailed result summaries
-  - Maintains operation logs
+**Key Features**:
+- Pydantic v2 models for validation
+- Nested configuration objects
+- Enum-based constants
+- YAML file loading support
+- Configuration merging with local overrides
 
-## Workflow
+**Design Patterns**:
+- Dataclass for metadata
+- BaseModel for configuration
+- Field validation with custom validators
+- Merge strategy pattern
+
+### 4. Code Analysis (`code_scanner.py`)
+
+**Responsibility**: Extract APIs, dependencies, and architecture from code
+
+**Features**:
+- Language-agnostic extraction
+- API documentation extraction
+- Dependency analysis
+- Architecture pattern detection
+
+### 5. Document Generators (`doc_generators.py`)
+
+**Responsibility**: Convert extracted info + metadata into Confluence storage format
+
+**Features**:
+- Multiple templates (API, Architecture, Runbook, ADR, etc.)
+- Metadata section generation
+- HTML storage format wrapping
+- Content validation
+
+### 6. Guardrails (`guardrails.py`)
+
+**Responsibility**: Validation and safety checks
+
+**Features**:
+- Metadata validation
+- Content size limits
+- Deprecated terms detection
+- Approval gates for sensitive operations
+
+### 7. Jira Integration (`jira_integration.py`)
+
+**Responsibility**: Optional Jira Cloud integration
+
+**Features**:
+- Issue searching and linking
+- Task creation for undocumented APIs
+- Epic linking
+- Graceful degradation if disabled
+
+**Design Pattern**: Optional feature that fails gracefully
+
+### 8. MCP Server (`mcp.py`)
+
+**Responsibility**: Claude integration via Model Context Protocol
+
+**Features**:
+- Tool definitions for Claude
+- Request/response handling
+- Error handling and formatting
+- Support for: confluence_document, confluence_search, confluence_archive
+
+## Data Flow
+
+### Document Generation Flow
 
 ```
-1. Initialize ConfluenceSkill with SkillConfig
+1. User Request (Claude or direct)
    ↓
-2. Call skill.document(task, repos, doc_type, ...)
+2. Configuration Loading & Merging (.confluence.yaml)
    ↓
-3. Prepare configuration (merge overrides)
+3. Input Validation (space_key, title, labels)
    ↓
-4. Scan code repositories
-   ├─ CodeScanner.scan_repos()
-   └─ Extract APIs, architecture, dependencies, etc.
+4. Repository Code Analysis (APIs, dependencies)
    ↓
-5. Generate document metadata
-   ├─ Title from task (auto-generated)
-   ├─ Owner/audience from config
-   └─ Status, labels, version
+5. Metadata Generation (owner, audience, status)
    ↓
-6. Check for existing documents
-   ├─ ConfluenceClient.find_page_by_title()
-   └─ Handle merge strategy if exists
+6. Content Generation (template-based)
    ↓
-7. Validate permissions
-   ├─ ConfluenceClient.check_write_permission()
-   └─ Early exit if no permission
+7. Guardrails Validation (size, deprecated terms)
    ↓
-8. Generate document content
-   ├─ Create appropriate DocGenerator
-   ├─ Pass extracted info
-   └─ Get storage format HTML
+8. Approval Gate (if required)
    ↓
-9. Validate content
-   ├─ GuardailValidator.validate_metadata()
-   ├─ GuardailValidator.validate_content()
-   └─ Collect errors and warnings
+9. API Validation (space exists, has permissions)
    ↓
-10. Request approval (if configured)
-    ├─ Show summary to user
-    └─ Wait for explicit confirmation
+10. Page Create/Update
     ↓
-11. Write to Confluence
-    ├─ Create or update page
-    ├─ Apply labels
-    ├─ Add audit comment
-    └─ Return result
+11. Jira Integration (link issues, create tasks)
     ↓
-12. Return DocumentGenerationResult
-    ├─ Success flag
-    ├─ Document ID and URL
-    ├─ All errors and warnings
-    └─ Duration and preview
+12. Result Reporting (URL, metadata, errors)
 ```
 
-## Safety Features
+## Configuration Merging Strategy
 
-### Dry-Run Mode
-- Default behavior: preview changes without writing
-- Can be overridden per operation
-- Shows what would happen without side effects
+Three-level configuration hierarchy:
 
-### Duplicate Prevention
-- Page title-based detection
-- Hash-based change detection
-- Configurable merge strategies (append, replace, skip, interactive)
-- Prevents accidental overwrites
+1. **Default** (hardcoded in SkillConfig)
+2. **Central** (organization-wide at ~/.confluence/config.yaml)
+3. **Local** (repo-specific at .confluence.yaml)
 
-### Permission Checks
-- Validates write access to space before operating
-- Handles 403 Forbidden gracefully
-- Caches permission results
+Each level overrides the previous. Local `.confluence.yaml` binds each repo to:
+- Confluence space (terrorgems, Hoad-cloud-platforms, Engineering)
+- Jira project (SCRUM, HCP, TPC, RFYT)
 
-### Validation Gates
-- Required metadata validation
-- Content size limits with warnings
-- Link validation (anchors, external URLs)
-- Deprecated term detection
-- Accessibility checks
+## Error Handling Strategy
 
-### Approval Gates
-- Can require explicit user approval before writing
-- Interactive mode for merge strategy selection
-- Approval caching to avoid repeated prompts
+**Fail-Fast Pattern**: Configuration errors detected immediately in __init__
 
-### Rate Limiting
-- Token bucket implementation
-- Prevents Confluence API throttling
-- Configurable limits per minute
+**Validation-First**: InputValidator validates all user inputs before API calls
 
-### Audit Trails
-- Optional audit comments on pages
-- Timestamp and metadata tracking
-- Change history available
-- Operation logs for debugging
+**Graceful Degradation**: Jira integration optional - works without it
 
-## Extension Points
-
-### Adding New Document Templates
-
-1. Create new generator class extending `DocGenerator`
-2. Implement `generate()` method
-3. Add to `create_generator()` factory
-4. Update `DocumentTemplate` enum
-5. Add tests in `test_doc_generators.py`
-
-Example:
-```python
-class MyDocGenerator(DocGenerator):
-    def generate(self) -> str:
-        parts = ["<h1>" + self.metadata.title + "</h1>"]
-        # Generate content...
-        return self._wrap_storage("\n".join(parts))
-```
-
-### Adding New Code Extraction Types
-
-1. Add extraction type to `CodeAnalysisConfig.extract`
-2. Implement `_extract_*()` method in `CodeScanner`
-3. Return structured dict with type, details
-4. Use in generators via `self.extracted_info`
-
-### Adding New Integrations
-
-1. Create integration config in `IntegrationConfig`
-2. Add client/wrapper class
-3. Call from appropriate location in `ConfluenceSkill`
-4. Add configuration documentation
+**Structured Results**: All operations return result objects with:
+- success: bool
+- errors: list[ValidationError]
+- warnings: list[ValidationError]
 
 ## Performance Considerations
 
-- **Caching**: Page lookups cached per session
-- **Rate Limiting**: Respects Confluence API limits
-- **File Limits**: Configurable max files analyzed
-- **Content Limits**: Warns for large documents
-- **Batch Operations**: Update multiple pages efficiently
+- **Rate Limiting**: 60 requests/minute (respects Confluence Cloud rate limits)
+- **Caching**: Pages and permissions cached locally
+- **Batch Operations**: bulk_label_pages for efficiency
+- **Timeout**: 30 seconds per API request with retry
 
 ## Testing Strategy
 
-- **Unit Tests**: Individual components (models, validators, generators)
-- **Integration Tests**: ConfluenceClient with mocked API
-- **Mock Fixtures**: Fixture-based testing with pytest
-- **Configuration Tests**: Validation of config files
-- **Error Scenarios**: Edge cases and failure modes
+**71 Tests** covering:
+- Unit tests (validators, generators, models)
+- Integration tests (skill workflows)
+- Configuration tests (merging, loading)
+- Jira integration tests (optional features)
 
-All tests run without hitting real Confluence instances (mocked API).
+**Coverage**: >85% code coverage
 
-## Known Limitations
+**Categories**:
+- unit: Individual component behavior
+- integration: End-to-end workflows
+- config: Configuration management
+- jira: Optional integration
 
-1. **Diagram Generation**: Requires additional tooling (Mermaid/Kroki)
-2. **Macro Support**: Limited support for complex Confluence macros
-3. **Legacy Cloud API**: Only supports v2 API (not v1)
-4. **Rate Limits**: 100 writes/minute due to Confluence limits
-5. **Concurrent Operations**: Not designed for concurrent access to same page
+## Extension Points
+
+The skill is designed for extensibility:
+
+1. **New Templates**: Add to DocumentTemplate enum and create generator
+2. **New Validators**: Add methods to InputValidator
+3. **New Integrations**: Follow Jira integration pattern (optional, graceful)
+4. **Custom Guardrails**: Extend GuardailsValidator
+5. **Language Support**: Extend CodeScanner with new language extractors
+
+## Standards Compliance
+
+- **Type Hints**: Full type coverage with strict mypy
+- **Docstrings**: Google-style docstrings on all public APIs
+- **Error Handling**: Comprehensive with clear user messages
+- **Configuration**: YAML-based with validation
+- **Logging**: Optional (user requested no logging in v1.2.0)
+
+## MCP Integration
+
+The skill exposes three tools to Claude:
+
+1. **confluence_document**: Generate docs from code
+2. **confluence_search**: Search existing pages
+3. **confluence_archive**: Archive pages safely
+
+Each tool:
+- Has descriptive schema
+- Returns structured results
+- Includes error handling
+- Supports dry-run for safety
+
+## Quality Metrics
+
+- **Tests**: 71 passing
+- **Coverage**: >85%
+- **Type Hints**: 100%
+- **Documentation**: Complete
+- **Error Messages**: Actionable and clear
+- **Version**: Semantic versioning (1.2.0)
