@@ -138,6 +138,21 @@ class OutputConfig(BaseModel):
     create_audit_trail: bool = True
 
 
+class JiraConfig(BaseModel):
+    """Jira integration configuration."""
+
+    enabled: bool = False
+    instance_url: Optional[str] = None
+    auth_token_env: str = "JIRA_TOKEN"
+    default_project: Optional[str] = None
+    auto_link_related: bool = True
+    create_tasks_for_gaps: bool = False
+    epic_link_pattern: Optional[str] = None  # e.g., "PROJ-\d+"
+    custom_fields: dict[str, str] = Field(default_factory=dict)
+
+    model_config = ConfigDict(use_enum_values=True)
+
+
 class SkillConfig(BaseModel):
     """Complete Confluence skill configuration."""
 
@@ -146,6 +161,7 @@ class SkillConfig(BaseModel):
     code_analysis: CodeAnalysisConfig = Field(default_factory=CodeAnalysisConfig)
     guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig)
     integration: IntegrationConfig = Field(default_factory=IntegrationConfig)
+    jira: JiraConfig = Field(default_factory=JiraConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
     @classmethod
@@ -158,6 +174,51 @@ class SkillConfig(BaseModel):
     def to_dict(self) -> dict:
         """Convert to dictionary (handles enums)."""
         return asdict(self)
+
+    def merge(self, local: "LocalConfig") -> "SkillConfig":
+        """Merge local config overrides into this config.
+
+        Args:
+            local: Local repository configuration
+
+        Returns:
+            Merged configuration with local overrides
+        """
+        merged_data = self.model_dump()
+
+        # Merge documentation config
+        if local.documentation:
+            doc_data = local.documentation.model_dump(exclude_none=True)
+            merged_data["documentation"].update(doc_data)
+
+        # Merge Jira config
+        if local.jira:
+            jira_data = local.jira.model_dump(exclude_none=True)
+            merged_data["jira"].update(jira_data)
+
+        # Merge code analysis config
+        if local.code_analysis:
+            ca_data = local.code_analysis.model_dump(exclude_none=True)
+            merged_data["code_analysis"].update(ca_data)
+
+        return SkillConfig(**merged_data)
+
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class LocalConfig(BaseModel):
+    """Local repository-level configuration overrides."""
+
+    documentation: Optional[DocumentationConfig] = None
+    jira: Optional[JiraConfig] = None
+    code_analysis: Optional[CodeAnalysisConfig] = None
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "LocalConfig":
+        """Load local config from YAML file."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**(data or {}))
 
     model_config = ConfigDict(use_enum_values=True)
 

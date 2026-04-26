@@ -1,13 +1,17 @@
 """Confluence documentation skill."""
 
 from .skill import ConfluenceSkill
-from .models import SkillConfig, DocumentGenerationResult
+from .models import SkillConfig, LocalConfig, DocumentGenerationResult, JiraConfig
 from .confluence_client import ConfluenceClient
+from .jira_integration import JiraIntegration
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = [
     "ConfluenceSkill",
     "SkillConfig",
+    "LocalConfig",
     "DocumentGenerationResult",
     "ConfluenceClient",
+    "JiraIntegration",
+    "JiraConfig",
 ]

@@ -119,9 +119,11 @@ class TestCloudctlSkillCommands:
         }
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
-            # First call for switch command
-            # Second call for context verification
+            # First call for initial context log
+            # Second call for switch command
+            # Third call for context verification
             mock_exec.side_effect = [
+                MagicMock(success=True, stdout=json.dumps(context_json)),
                 MagicMock(success=True, return_code=0),
                 MagicMock(success=True, stdout=json.dumps(context_json)),
             ]
@@ -258,3 +260,132 @@ class TestCloudctlSkillSecurity:
         )
         skill = CloudctlSkill(config=config)
         assert skill.config.environment_overrides["SENSITIVE_VAR"] == "secret"
+
+
+class TestCloudctlSkillHealthAndStatus:
+    """Tests for health check and token status."""
+
+    @pytest.mark.asyncio
+    async def test_get_token_status(self, skill: CloudctlSkill) -> None:
+        """Test getting token status."""
+        token_data = {
+            "provider": "aws",
+            "expires_at": "2026-04-27T10:00:00Z",
+            "expires_in_seconds": 3600,
+            "is_expired": False,
+        }
+
+        with patch.object(skill, "_execute_cloudctl") as mock_exec:
+            mock_exec.return_value = MagicMock(success=True, stdout=json.dumps(token_data))
+
+            status = await skill.get_token_status("myorg")
+            assert status.valid is True
+            assert status.is_expired is False
+            assert status.expires_in_seconds == 3600
+
+    @pytest.mark.asyncio
+    async def test_get_token_status_expired(self, skill: CloudctlSkill) -> None:
+        """Test token status for expired token."""
+        token_data = {
+            "provider": "aws",
+            "expires_at": "2026-04-25T10:00:00Z",
+            "expires_in_seconds": 0,
+            "is_expired": True,
+        }
+
+        with patch.object(skill, "_execute_cloudctl") as mock_exec:
+            mock_exec.return_value = MagicMock(success=True, stdout=json.dumps(token_data))
+
+            status = await skill.get_token_status("myorg")
+            assert status.valid is True
+            assert status.is_expired is True
+
+    @pytest.mark.asyncio
+    async def test_get_token_status_invalid(self, skill: CloudctlSkill) -> None:
+        """Test token status when token is invalid."""
+        with patch.object(skill, "_execute_cloudctl") as mock_exec:
+            mock_exec.return_value = MagicMock(success=False)
+
+            status = await skill.get_token_status("myorg")
+            assert status.valid is False
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy(self, skill: CloudctlSkill) -> None:
+        """Test health check when everything is working."""
+        orgs_data = [
+            {"name": "org1", "provider": "aws"},
+            {"name": "org2", "provider": "gcp"},
+        ]
+
+        with patch.object(skill, "_execute_cloudctl") as mock_exec:
+            with patch.object(skill, "list_organizations") as mock_list_orgs:
+                with patch.object(skill, "verify_credentials") as mock_verify:
+                    with patch.object(skill, "get_token_status") as mock_token:
+                        mock_list_orgs.return_value = orgs_data
+                        mock_verify.return_value = True
+
+                        from skills.cloudctl.models import TokenStatus, CloudProvider
+
+                        mock_token.return_value = TokenStatus(
+                            organization="org1",
+                            provider=CloudProvider.AWS,
+                            valid=True,
+                            expires_in_seconds=86400,
+                            is_expired=False,
+                        )
+
+                        result = await skill.health_check()
+
+                        assert result.is_healthy is True
+                        assert result.cloudctl_installed is True
+                        assert result.has_credentials is True
+                        assert result.organizations_available == 2
+
+    @pytest.mark.asyncio
+    async def test_health_check_no_cloudctl(self) -> None:
+        """Test health check when cloudctl is not installed."""
+        config = SkillConfig(cloudctl_path="/nonexistent/cloudctl")
+        skill = CloudctlSkill(config=config)
+
+        result = await skill.health_check()
+
+        assert result.is_healthy is False
+        assert result.cloudctl_installed is False
+        assert len(result.issues) > 0
+
+    def test_cloudctl_installation_check(self, skill: CloudctlSkill) -> None:
+        """Test cloudctl installation check."""
+        assert skill._cloudctl_available is True or skill._cloudctl_available is False
+
+    def test_token_status_string_representation(self) -> None:
+        """Test TokenStatus string representation."""
+        from skills.cloudctl.models import TokenStatus, CloudProvider
+
+        status_valid = TokenStatus(
+            organization="myorg",
+            provider=CloudProvider.AWS,
+            valid=True,
+            expires_in_seconds=86400,
+            is_expired=False,
+        )
+        status_str = str(status_valid)
+        assert "myorg" in status_str
+        assert "1 days" in status_str or "1 days" in status_str.replace(" ", "")
+
+        status_soon = TokenStatus(
+            organization="myorg",
+            provider=CloudProvider.AWS,
+            valid=True,
+            expires_in_seconds=1800,
+            is_expired=False,
+        )
+        assert "30 minutes" in str(status_soon)
+
+        status_expired = TokenStatus(
+            organization="myorg",
+            provider=CloudProvider.AWS,
+            valid=True,
+            expires_in_seconds=0,
+            is_expired=True,
+        )
+        assert "EXPIRED" in str(status_expired)

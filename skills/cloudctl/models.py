@@ -143,3 +143,72 @@ class OperationLog(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class TokenStatus(BaseModel):
+    """Token expiry status for an organization."""
+
+    organization: str
+    provider: CloudProvider
+    valid: bool
+    expires_at: Optional[str] = None
+    expires_in_seconds: Optional[int] = None
+    is_expired: bool = False
+
+    def __str__(self) -> str:
+        """Human-readable representation."""
+        if not self.valid:
+            return f"❌ {self.organization}: Invalid or missing token"
+        if self.is_expired:
+            return f"⏰ {self.organization}: Token EXPIRED"
+        if self.expires_in_seconds:
+            hours = self.expires_in_seconds / 3600
+            if hours < 1:
+                return f"🔴 {self.organization}: Token expires in {int(self.expires_in_seconds // 60)} minutes"
+            elif hours < 24:
+                return f"🟡 {self.organization}: Token expires in {int(hours)} hours"
+            else:
+                return f"✅ {self.organization}: Token valid for {int(hours // 24)} days"
+        return f"✅ {self.organization}: Token valid"
+
+
+class HealthCheckResult(BaseModel):
+    """Result of health check operation."""
+
+    cloudctl_installed: bool
+    cloudctl_version: Optional[str] = None
+    has_credentials: bool = False
+    organizations_available: int = 0
+    can_access_cloud: bool = False
+    issues: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    def __str__(self) -> str:
+        """Human-readable representation."""
+        status = "✅ HEALTHY" if self.is_healthy else "❌ ISSUES FOUND"
+        lines = [f"[bold]{status}[/bold]"]
+        lines.append(f"  cloudctl installed: {'✅' if self.cloudctl_installed else '❌'}")
+        if self.cloudctl_version:
+            lines.append(f"  cloudctl version: {self.cloudctl_version}")
+        lines.append(f"  credentials: {'✅' if self.has_credentials else '❌'}")
+        lines.append(f"  organizations: {self.organizations_available}")
+        lines.append(f"  cloud access: {'✅' if self.can_access_cloud else '❌'}")
+        if self.issues:
+            lines.append("[bold red]Issues:[/bold red]")
+            for issue in self.issues:
+                lines.append(f"  • {issue}")
+        if self.warnings:
+            lines.append("[bold yellow]Warnings:[/bold yellow]")
+            for warning in self.warnings:
+                lines.append(f"  • {warning}")
+        return "\n".join(lines)
+
+    @property
+    def is_healthy(self) -> bool:
+        """Check if system is healthy."""
+        return (
+            self.cloudctl_installed
+            and self.has_credentials
+            and self.organizations_available > 0
+            and not self.issues
+        )

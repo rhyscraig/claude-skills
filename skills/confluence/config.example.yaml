@@ -143,11 +143,33 @@ integration:
     # Link code snippets to GitHub web URLs
     link_to_repo: true
 
-  jira:
-    # Enable Jira integration (optional)
-    enabled: false
-    # url: "https://company.atlassian.net"
-    # link_related_issues: true
+# Jira integration configuration
+jira:
+  # Enable Jira integration
+  enabled: true
+
+  # Jira Cloud instance URL
+  instance_url: "https://company.atlassian.net"
+
+  # Environment variable containing Jira API token
+  # Generate at: https://id.atlassian.com/manage-profile/security/api-tokens
+  auth_token_env: "JIRA_TOKEN"
+
+  # Default project key (can be overridden per-repo)
+  default_project: "ENGR"
+
+  # Auto-link related Jira issues to documentation
+  auto_link_related: true
+
+  # Create Jira tasks for undocumented APIs
+  create_tasks_for_gaps: false
+
+  # Pattern to find epic links (e.g., "PROJ-\d+")
+  epic_link_pattern: null
+
+  # Custom field mappings (e.g., epic link field ID)
+  custom_fields:
+    # epic_link: "customfield_10014"
 
 # Output and logging
 output:

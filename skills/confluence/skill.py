@@ -1,6 +1,7 @@
 """Main Confluence documentation skill."""
 
 import hashlib
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
@@ -13,13 +14,19 @@ from .code_scanner import CodeScanner
 from .confluence_client import ConfluenceClient
 from .doc_generators import create_generator, DocumentTemplate
 from .guardrails import GuardailValidator, ApprovalGate
+from .jira_integration import JiraIntegration
 from .models import (
     SkillConfig,
+    LocalConfig,
     DocumentMetadata,
     DocumentChange,
     DocumentGenerationResult,
     ValidationError,
 )
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 class ConfluenceSkill:
@@ -49,6 +56,7 @@ class ConfluenceSkill:
         doc_type: Optional[str] = None,
         space_key: Optional[str] = None,
         parent_page_title: Optional[str] = None,
+        repo_path: Optional[str] = None,
         dry_run: Optional[bool] = None,
         interactive: bool = False,
     ) -> DocumentGenerationResult:
@@ -60,6 +68,7 @@ class ConfluenceSkill:
             doc_type: Document template type
             space_key: Target space key (overrides config)
             parent_page_title: Parent page title
+            repo_path: Path to repository (loads .confluence.yaml for local config)
             dry_run: Run in dry-run mode (overrides config default)
             interactive: Interactive mode for approvals
 
@@ -73,14 +82,22 @@ class ConfluenceSkill:
         )
 
         self.approval_gate.interactive = interactive
+        working_config = self.config
 
         try:
             self.console.print(f"\n[bold blue]Confluence Documentation Skill[/bold blue]")
             self.console.print(f"Task: {task}\n")
 
+            # 0. Load and merge local config if provided
+            if repo_path:
+                self.console.print("[cyan]0. Loading local configuration...[/cyan]")
+                working_config = self._load_and_merge_config(repo_path)
+                if working_config != self.config:
+                    self.console.print("[green]   ✅ Merged local .confluence.yaml[/green]")
+
             # 1. Prepare configuration
             self.console.print("[cyan]1. Preparing configuration...[/cyan]")
-            doc_config = self._prepare_config(doc_type, space_key, parent_page_title, repos)
+            doc_config = self._prepare_config(doc_type, space_key, parent_page_title, repos, working_config)
 
             # 2. Scan code repositories
             self.console.print("[cyan]2. Analyzing code repositories...[/cyan]")
@@ -125,6 +142,14 @@ class ConfluenceSkill:
                     )
                 )
                 return result
+
+            # 5b. Initialize Jira integration if enabled
+            jira_integration = None
+            if working_config.jira.enabled:
+                self.console.print("[cyan]5b. Initializing Jira integration...[/cyan]")
+                jira_integration = JiraIntegration(working_config.jira)
+                if not jira_integration.client.enabled:
+                    self.console.print("[yellow]   ⚠️  Jira integration disabled (check credentials)[/yellow]")
 
             # 6. Generate document content
             self.console.print("[cyan]6. Generating document content...[/cyan]")
@@ -202,6 +227,33 @@ class ConfluenceSkill:
 
                 result.success = True
 
+                # 10. Integrate with Jira if enabled
+                if jira_integration and jira_integration.config.enabled:
+                    self.console.print("[cyan]9. Integrating with Jira...[/cyan]")
+                    project = jira_integration.config.default_project
+                    if project:
+                        # Link related issues
+                        issues = jira_integration.link_related_issues(
+                            result.document_id,
+                            project,
+                            metadata.title,
+                            self.client,
+                        )
+
+                        # Create tasks for undocumented APIs
+                        if jira_integration.config.create_tasks_for_gaps:
+                            apis = extracted_info.get("apis", [])
+                            if apis:
+                                created = jira_integration.create_tasks_for_gaps(
+                                    project,
+                                    apis,
+                                    epic_key=jira_integration.client.find_epic_for_service(project, metadata.title) if jira_integration.config.epic_link_pattern else None,
+                                )
+                                if created:
+                                    self.console.print(
+                                        f"[green]✅ Created {len(created)} tasks for undocumented APIs[/green]"
+                                    )
+
         except Exception as e:
             self.console.print(f"[red]❌ Error: {str(e)}[/red]")
             result.errors.append(
@@ -219,7 +271,36 @@ class ConfluenceSkill:
 
         return result
 
-    def _prepare_config(self, doc_type, space_key, parent_page_title, repos):
+    def _load_and_merge_config(self, repo_path: str) -> SkillConfig:
+        """Load and merge local config from repository.
+
+        Args:
+            repo_path: Path to repository
+
+        Returns:
+            Merged configuration
+        """
+        repo_path_obj = Path(repo_path)
+        if not repo_path_obj.is_absolute():
+            repo_path_obj = Path("/Users/craighoad/Repos") / repo_path_obj
+
+        local_config_path = repo_path_obj / ".confluence.yaml"
+
+        if not local_config_path.exists():
+            logger.debug(f"No .confluence.yaml found in {repo_path}")
+            return self.config
+
+        try:
+            local_config = LocalConfig.from_yaml(local_config_path)
+            merged = self.config.merge(local_config)
+            logger.info(f"Merged config from {local_config_path}")
+            return merged
+        except Exception as e:
+            self.console.print(f"[yellow]Warning: Failed to load local config: {e}[/yellow]")
+            logger.warning(f"Failed to load local config from {local_config_path}: {e}")
+            return self.config
+
+    def _prepare_config(self, doc_type, space_key, parent_page_title, repos, working_config=None):
         """Prepare documentation configuration.
 
         Args:
@@ -227,11 +308,15 @@ class ConfluenceSkill:
             space_key: Space key override
             parent_page_title: Parent page title override
             repos: Repos override
+            working_config: Configuration to use (defaults to self.config)
 
         Returns:
             Prepared configuration object
         """
-        config = self.config.documentation
+        if working_config is None:
+            working_config = self.config
+
+        config = working_config.documentation
 
         # Override template
         if doc_type:
@@ -244,13 +329,13 @@ class ConfluenceSkill:
         if space_key:
             config.space_key = space_key
         if not config.space_key:
-            config.space_key = self.config.confluence.space_key
+            config.space_key = working_config.confluence.space_key
 
         if parent_page_title:
             config.parent_page = parent_page_title
 
         if repos:
-            self.config.code_analysis.repos = [{"path": r} for r in repos]
+            working_config.code_analysis.repos = [{"path": r} for r in repos]
 
         return config
 

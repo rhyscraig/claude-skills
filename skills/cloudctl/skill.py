@@ -12,7 +12,16 @@ from typing import Optional
 from rich.console import Console
 from rich.syntax import Syntax
 
-from .models import CloudContext, CloudProvider, CommandResult, CommandStatus, OperationLog, SkillConfig
+from .models import (
+    CloudContext,
+    CloudProvider,
+    CommandResult,
+    CommandStatus,
+    HealthCheckResult,
+    OperationLog,
+    SkillConfig,
+    TokenStatus,
+)
 
 
 class CloudctlSkill:
@@ -28,6 +37,7 @@ class CloudctlSkill:
         self.console = Console()
         self._context_cache: Optional[CloudContext] = None
         self._operation_log: list[OperationLog] = []
+        self._cloudctl_available = self._check_cloudctl_installed()
 
     async def switch_context(
         self,
@@ -48,6 +58,13 @@ class CloudctlSkill:
         if not organization:
             raise ValueError("Organization is required")
 
+        # Log current context before switch
+        try:
+            old_context = await self.get_context()
+            self.console.print(f"[dim]📍 Current: {old_context}[/dim]")
+        except Exception:
+            pass
+
         cmd_parts = ["switch", organization]
         if account_id:
             cmd_parts.append(account_id)
@@ -59,7 +76,7 @@ class CloudctlSkill:
         if result.success and self.config.verify_context_after_switch:
             context = await self.get_context()
             self._context_cache = context
-            self.console.print(f"[green]✅ Switched to context: {context}[/green]")
+            self.console.print(f"[green]✅ Switched to: {context}[/green]")
         elif not result.success:
             self.console.print(f"[red]❌ Context switch failed: {result.stderr}[/red]")
 
@@ -157,6 +174,14 @@ class CloudctlSkill:
         Returns:
             CommandResult
         """
+        # Log current context before executing
+        try:
+            context = await self.get_context()
+            self._context_cache = context
+            self.console.print(f"[dim]📍 Operating in: {context}[/dim]")
+        except Exception:
+            pass
+
         result = await self._execute_cloudctl(command)
 
         if verify_context and result.success:
@@ -181,6 +206,126 @@ class CloudctlSkill:
             result = await self._execute_cloudctl(["env", organization])
             return result.success
         except Exception:
+            return False
+
+    async def get_token_status(self, organization: str) -> TokenStatus:
+        """Get token expiry status for an organization.
+
+        Args:
+            organization: Organization name
+
+        Returns:
+            TokenStatus with expiry information
+        """
+        try:
+            result = await self._execute_cloudctl(["token", "status", organization, "--json"])
+
+            if not result.success:
+                return TokenStatus(
+                    organization=organization,
+                    provider=CloudProvider.AWS,
+                    valid=False,
+                )
+
+            try:
+                data = json.loads(result.stdout)
+                provider = CloudProvider(data.get("provider", "aws"))
+                expires_at = data.get("expires_at")
+                expires_in_seconds = data.get("expires_in_seconds")
+                is_expired = data.get("is_expired", False)
+
+                return TokenStatus(
+                    organization=organization,
+                    provider=provider,
+                    valid=True,
+                    expires_at=expires_at,
+                    expires_in_seconds=expires_in_seconds,
+                    is_expired=is_expired,
+                )
+            except (json.JSONDecodeError, ValueError):
+                return TokenStatus(
+                    organization=organization,
+                    provider=CloudProvider.AWS,
+                    valid=False,
+                )
+        except Exception:
+            return TokenStatus(
+                organization=organization,
+                provider=CloudProvider.AWS,
+                valid=False,
+            )
+
+    async def health_check(self) -> HealthCheckResult:
+        """Perform comprehensive health check on cloudctl setup.
+
+        Returns:
+            HealthCheckResult with diagnostic information
+        """
+        result = HealthCheckResult(
+            cloudctl_installed=self._cloudctl_available,
+        )
+
+        if not result.cloudctl_installed:
+            result.issues.append(
+                f"cloudctl not found at {self.config.cloudctl_path}. Install or set CLOUDCTL_PATH environment variable."
+            )
+            return result
+
+        # Check version
+        try:
+            version_result = await self._execute_cloudctl(["--version"])
+            if version_result.success:
+                result.cloudctl_version = version_result.stdout.strip()
+        except Exception:
+            pass
+
+        # Check credentials
+        try:
+            orgs = await self.list_organizations()
+            result.organizations_available = len(orgs)
+
+            if result.organizations_available == 0:
+                result.issues.append("No organizations configured")
+                result.has_credentials = False
+            else:
+                result.has_credentials = True
+
+                # Try to access at least one org
+                for org in orgs:
+                    if await self.verify_credentials(org.get("name", "")):
+                        result.can_access_cloud = True
+                        break
+
+                if not result.can_access_cloud:
+                    result.warnings.append("Configured organizations found but unable to access any")
+
+                # Check token expiry for each org
+                for org in orgs:
+                    token_status = await self.get_token_status(org.get("name", ""))
+                    if token_status.expires_in_seconds and token_status.expires_in_seconds < 3600:
+                        result.warnings.append(
+                            f"{org.get('name', '')}: Token expires in {token_status.expires_in_seconds // 60} minutes"
+                        )
+
+        except Exception as e:
+            result.issues.append(f"Failed to check credentials: {str(e)}")
+
+        return result
+
+    def _check_cloudctl_installed(self) -> bool:
+        """Check if cloudctl is installed at configured path.
+
+        Returns:
+            True if cloudctl is available, False otherwise
+        """
+        try:
+            result = subprocess.run(
+                [self.config.cloudctl_path, "--version"],
+                capture_output=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
     async def _execute_cloudctl(self, args: list[str], retries: int = 0) -> CommandResult:
@@ -264,6 +409,30 @@ class CloudctlSkill:
                 stderr=f"Error executing cloudctl: {str(e)}",
                 command=" ".join(args),
             )
+
+    def _should_auto_refresh_token(self, result: CommandResult, args: list[str]) -> bool:
+        """Check if we should auto-refresh token and retry.
+
+        Args:
+            result: CommandResult with potential error
+            args: Command arguments
+
+        Returns:
+            True if token refresh should be attempted
+        """
+        if result.success:
+            return False
+
+        error_text = (result.stderr + result.stdout).lower()
+        token_errors = ["unauthorized", "token expired", "token invalid", "not authenticated", "invalid credentials"]
+
+        for error in token_errors:
+            if error in error_text:
+                # Only auto-refresh for context commands, not for login itself
+                if args and args[0] not in ["login"]:
+                    return True
+
+        return False
 
     def log_operation(
         self,
