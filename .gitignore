@@ -1,13 +1,169 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+.tox/
+.hypothesis/
+*.cover
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Virtual environments
 venv/
 env/
-.DS_Store
+ENV/
+env.bak/
+venv.bak/
+.venv
+
+# IDE & Editor
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+.env.local
+.env.*.local
+
+# Logging
 *.log
+*.pot
+
+# CRITICAL: Never commit secrets or credentials
 .env
+.env.*
+!.env.example
+!.env.*.example
+
+# Secrets and credentials (absolute block)
+*.key
+*.pem
+*.p12
+*.pfx
+*.pkcs12
+*.jks
+*.keystore
+*.bks
+secrets/
+.aws/
+.gcp/
+.azure/
+.ssh/
+credentials.json
+client_secret.json
+firebase-key.json
+config/secrets/
+config/credentials/
+.credentials
+*.credentials
+
+# API Keys and Tokens (patterns)
+*token*
+*secret*
+*apikey*
+*api_key*
+*password*
+*passwd*
+*auth*
+
+# Local configuration (never commit with real values)
+config.local.json
+config.local.yaml
+config.local.yml
+local.conf
+.env.local.json
+
+# Private/Internal (never commit)
+private/
+internal/
+*.private.*
+.internal/
+
+# Build artifacts
+*.o
+*.a
+*.so
+.libs/
+*.dylib
+*.dll
+*.exe
+*.out
+
+# Package manager
+requirements-dev.lock
+pip-log.txt
+pip-delete-this-directory.txt
+poetry.lock
+
+# Documentation build
+site/
+docs/_build/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache
+.cache/
+*.cache
+
+# IDE config files that might contain paths/credentials
+.vscode/settings.json.local
+launch.json.local
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# OS-specific
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+desktop.ini
+
+# Pre-commit
+.pre-commit-framework

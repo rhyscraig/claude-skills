@@ -1,0 +1,14 @@
+{
+  "exclude_dirs": ["tests", ".venv", "venv"],
+  "tests": [
+    "B101",  # assert_used
+    "B601",  # paramiko_calls
+    "B607",  # partial_paramiko_calls
+  ],
+  "assert_used": {
+    "skips": [
+      "test_*.py",
+      "*_test.py"
+    ]
+  }
+}
