@@ -88,19 +88,18 @@ class TestCloudctlSkillCommands:
 
     @pytest.mark.asyncio
     async def test_get_context(self, skill: CloudctlSkill, mock_context: CloudContext) -> None:
-        """Test getting current context."""
-        context_json = {
-            "provider": "aws",
-            "organization": "myorg",
-            "account_id": "123456789",
-            "role": "admin",
-            "region": "us-east-1",
-        }
+        """Test getting current context from plaintext env output."""
+        context_plaintext = """PROVIDER=aws
+ORGANIZATION=myorg
+ACCOUNT_ID=123456789
+ROLE=admin
+REGION=us-east-1
+"""
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
             mock_exec.return_value = MagicMock(
                 success=True,
-                stdout=json.dumps(context_json),
+                stdout=context_plaintext,
             )
 
             context = await skill.get_context()
@@ -110,22 +109,21 @@ class TestCloudctlSkillCommands:
     @pytest.mark.asyncio
     async def test_switch_context(self, skill: CloudctlSkill, mock_context: CloudContext) -> None:
         """Test switching context."""
-        context_json = {
-            "provider": "aws",
-            "organization": "myorg",
-            "account_id": "123456789",
-            "role": "admin",
-            "region": "us-east-1",
-        }
+        context_plaintext = """PROVIDER=aws
+ORGANIZATION=myorg
+ACCOUNT_ID=123456789
+ROLE=admin
+REGION=us-east-1
+"""
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
             # First call for initial context log
             # Second call for switch command
             # Third call for context verification
             mock_exec.side_effect = [
-                MagicMock(success=True, stdout=json.dumps(context_json)),
+                MagicMock(success=True, stdout=context_plaintext),
                 MagicMock(success=True, return_code=0),
-                MagicMock(success=True, stdout=json.dumps(context_json)),
+                MagicMock(success=True, stdout=context_plaintext),
             ]
 
             result = await skill.switch_context("myorg", "123456789", "admin")
@@ -154,21 +152,23 @@ class TestCloudctlSkillCommands:
 
     @pytest.mark.asyncio
     async def test_list_organizations(self, skill: CloudctlSkill) -> None:
-        """Test listing organizations."""
-        orgs_data = [
-            {"name": "myorg", "provider": "aws"},
-            {"name": "gcp-org", "provider": "gcp"},
-        ]
+        """Test listing organizations from plaintext output."""
+        orgs_plaintext = """Configured Organizations (2)
+
+  myorg      [AWS]   enabled       https://d-9c67661145.awsapps.com/start
+  gcp-org    [GCP]   enabled       https://console.cloud.google.com
+"""
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
             mock_exec.return_value = MagicMock(
                 success=True,
-                stdout=json.dumps(orgs_data),
+                stdout=orgs_plaintext,
             )
 
             orgs = await skill.list_organizations()
             assert len(orgs) == 2
             assert orgs[0]["name"] == "myorg"
+            assert orgs[1]["provider"] == "gcp"
 
     @pytest.mark.asyncio
     async def test_verify_credentials(self, skill: CloudctlSkill) -> None:
@@ -268,37 +268,39 @@ class TestCloudctlSkillHealthAndStatus:
     @pytest.mark.asyncio
     async def test_get_token_status(self, skill: CloudctlSkill) -> None:
         """Test getting token status."""
-        token_data = {
-            "provider": "aws",
-            "expires_at": "2026-04-27T10:00:00Z",
-            "expires_in_seconds": 3600,
-            "is_expired": False,
-        }
+        orgs_plaintext = """Configured Organizations (1)
+
+  myorg      [AWS]   enabled       https://d-9c67661145.awsapps.com/start
+"""
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
-            mock_exec.return_value = MagicMock(success=True, stdout=json.dumps(token_data))
+            # First call: list_organizations
+            # Second call: env check
+            mock_exec.side_effect = [
+                MagicMock(success=True, stdout=orgs_plaintext),
+                MagicMock(success=True),
+            ]
 
-            status = await skill.get_token_status("myorg")
-            assert status.valid is True
-            assert status.is_expired is False
-            assert status.expires_in_seconds == 3600
+            with patch.object(skill, "list_organizations") as mock_list_orgs:
+                mock_list_orgs.return_value = [
+                    {"name": "myorg", "provider": "aws"}
+                ]
+
+                status = await skill.get_token_status("myorg")
+                assert status.valid is True
 
     @pytest.mark.asyncio
     async def test_get_token_status_expired(self, skill: CloudctlSkill) -> None:
-        """Test token status for expired token."""
-        token_data = {
-            "provider": "aws",
-            "expires_at": "2026-04-25T10:00:00Z",
-            "expires_in_seconds": 0,
-            "is_expired": True,
-        }
-
+        """Test token status when credentials are invalid."""
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
-            mock_exec.return_value = MagicMock(success=True, stdout=json.dumps(token_data))
+            with patch.object(skill, "list_organizations") as mock_list_orgs:
+                mock_list_orgs.return_value = [
+                    {"name": "myorg", "provider": "aws"}
+                ]
+                mock_exec.return_value = MagicMock(success=False)
 
-            status = await skill.get_token_status("myorg")
-            assert status.valid is True
-            assert status.is_expired is True
+                status = await skill.get_token_status("myorg")
+                assert status.valid is False
 
     @pytest.mark.asyncio
     async def test_get_token_status_invalid(self, skill: CloudctlSkill) -> None:
@@ -360,16 +362,15 @@ class TestCloudctlSkillHealthAndStatus:
     @pytest.mark.asyncio
     async def test_switch_region(self, skill: CloudctlSkill) -> None:
         """Test switching regions."""
-        context_json = {
-            "provider": "aws",
-            "organization": "myorg",
-            "region": "us-west-2",
-        }
+        context_plaintext = """PROVIDER=aws
+ORGANIZATION=myorg
+REGION=us-west-2
+"""
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
             mock_exec.side_effect = [
                 MagicMock(success=True, return_code=0),
-                MagicMock(success=True, stdout=json.dumps(context_json)),
+                MagicMock(success=True, stdout=context_plaintext),
             ]
 
             result = await skill.switch_region("us-west-2")
@@ -378,16 +379,15 @@ class TestCloudctlSkillHealthAndStatus:
     @pytest.mark.asyncio
     async def test_switch_project(self, skill: CloudctlSkill) -> None:
         """Test switching GCP projects."""
-        context_json = {
-            "provider": "gcp",
-            "organization": "myorg",
-            "project_id": "my-project-123",
-        }
+        context_plaintext = """PROVIDER=gcp
+ORGANIZATION=myorg
+PROJECT_ID=my-project-123
+"""
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
             mock_exec.side_effect = [
                 MagicMock(success=True, return_code=0),
-                MagicMock(success=True, stdout=json.dumps(context_json)),
+                MagicMock(success=True, stdout=context_plaintext),
             ]
 
             result = await skill.switch_project("my-project-123")
@@ -531,15 +531,14 @@ class TestCloudctlSkillHealthAndStatus:
     @pytest.mark.asyncio
     async def test_validate_switch(self, skill: CloudctlSkill) -> None:
         """Test context validation after switch."""
-        context_json = {
-            "provider": "aws",
-            "organization": "myorg",
-            "account_id": "123456789",
-        }
+        context_plaintext = """PROVIDER=aws
+ORGANIZATION=myorg
+ACCOUNT_ID=123456789
+"""
 
         with patch.object(skill, "_execute_cloudctl") as mock_exec:
             mock_exec.side_effect = [
-                MagicMock(success=True, stdout=json.dumps(context_json)),
+                MagicMock(success=True, stdout=context_plaintext),
                 MagicMock(success=True),
             ]
 

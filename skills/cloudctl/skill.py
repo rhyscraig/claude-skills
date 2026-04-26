@@ -152,47 +152,92 @@ class CloudctlSkill:
     async def get_context(self) -> CloudContext:
         """Get current cloud context.
 
+        Parses plaintext output from 'cloudctl env'.
+
         Returns:
             CloudContext with current provider, org, account, role, etc.
         """
-        result = await self._execute_cloudctl(["env", "--json"])
+        result = await self._execute_cloudctl(["env"])
 
         if not result.success:
             raise RuntimeError(f"Failed to get context: {result.stderr}")
 
-        try:
-            data = json.loads(result.stdout)
-            provider = CloudProvider(data.get("provider", "aws"))
+        # Parse plaintext env output format:
+        # ORGANIZATION=myorg
+        # ACCOUNT_ID=123456789
+        # ROLE=terraform
+        # REGION=us-west-2
+        # PROVIDER=aws
+        data = {}
+        for line in result.stdout.split("\n"):
+            line = line.strip()
+            if "=" in line:
+                key, value = line.split("=", 1)
+                data[key.lower()] = value
 
-            return CloudContext(
-                provider=provider,
-                organization=data.get("organization", "unknown"),
-                account_id=data.get("account_id"),
-                role=data.get("role"),
-                region=data.get("region"),
-                project_id=data.get("project_id"),
-            )
-        except (json.JSONDecodeError, ValueError) as e:
-            raise RuntimeError(f"Failed to parse context: {e}")
+        provider_str = data.get("provider", "aws").lower()
+        try:
+            provider = CloudProvider(provider_str)
+        except ValueError:
+            provider = CloudProvider.AWS
+
+        return CloudContext(
+            provider=provider,
+            organization=data.get("organization", "unknown"),
+            account_id=data.get("account_id"),
+            role=data.get("role"),
+            region=data.get("region"),
+            project_id=data.get("project_id"),
+        )
 
     async def list_organizations(self) -> list[dict]:
         """List all configured organizations.
 
+        Parses plaintext output from 'cloudctl org list'.
+
         Returns:
             List of organization configuration dicts
         """
-        result = await self._execute_cloudctl(["org", "list", "--json"])
+        result = await self._execute_cloudctl(["org", "list"])
 
         if not result.success:
             raise RuntimeError(f"Failed to list organizations: {result.stderr}")
 
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Failed to parse organizations: {e}")
+        orgs = []
+        lines = result.stdout.strip().split("\n")
+
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("Configured Organizations"):
+                continue
+
+            # Parse: "  myorg  [AWS]  enabled       https://..."
+            parts = line.split()
+            if len(parts) >= 3:
+                org_name = parts[0]
+                provider_str = parts[1].strip("[]")
+                status = parts[2] if len(parts) > 2 else "enabled"
+
+                provider = "aws"
+                if "gcp" in provider_str.lower():
+                    provider = "gcp"
+                elif "azure" in provider_str.lower():
+                    provider = "azure"
+
+                orgs.append(
+                    {
+                        "name": org_name,
+                        "provider": provider,
+                        "status": status,
+                    }
+                )
+
+        return orgs
 
     async def list_accounts(self, organization: str) -> list[dict]:
         """List accounts for organization.
+
+        Parses plaintext output from 'cloudctl accounts <org>'.
 
         Args:
             organization: Organization name
@@ -200,15 +245,31 @@ class CloudctlSkill:
         Returns:
             List of account configuration dicts
         """
-        result = await self._execute_cloudctl(["accounts", organization, "--json"])
+        result = await self._execute_cloudctl(["accounts", organization])
 
         if not result.success:
             raise RuntimeError(f"Failed to list accounts: {result.stderr}")
 
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Failed to parse accounts: {e}")
+        accounts = []
+        lines = result.stdout.strip().split("\n")
+
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("Accounts"):
+                continue
+
+            # Parse account lines (format varies by provider)
+            # Expected: account_id  account_name  [optional metadata]
+            parts = line.split()
+            if len(parts) >= 1:
+                accounts.append(
+                    {
+                        "id": parts[0],
+                        "name": parts[1] if len(parts) > 1 else parts[0],
+                    }
+                )
+
+        return accounts
 
     async def execute_command(self, command: list[str], verify_context: bool = True) -> CommandResult:
         """Execute arbitrary cloudctl command.
@@ -255,57 +316,42 @@ class CloudctlSkill:
             return False
 
     async def get_token_status(self, organization: str) -> TokenStatus:
-        """Get token expiry status for an organization.
+        """Get token validity status for an organization.
 
-        Gracefully handles older cloudctl versions that don't support 'token status'.
+        cloudctl v4.0.0 doesn't provide detailed token expiry info,
+        so this checks if credentials are currently valid.
 
         Args:
             organization: Organization name
 
         Returns:
-            TokenStatus with expiry information (valid=False if unavailable)
+            TokenStatus with validity information
         """
         try:
-            result = await self._execute_cloudctl(["token", "status", organization, "--json"])
+            # Check if we can access the org's environment
+            result = await self._execute_cloudctl(["env", organization])
+            valid = result.success
 
-            # If command not found (old version), try fallback method
-            if result.return_code == 127 or "not found" in result.stderr.lower():
-                # Graceful degradation: just check if credentials work
-                verify_result = await self.verify_credentials(organization)
-                return TokenStatus(
-                    organization=organization,
-                    provider=CloudProvider.AWS,
-                    valid=verify_result,
-                )
-
-            if not result.success:
-                return TokenStatus(
-                    organization=organization,
-                    provider=CloudProvider.AWS,
-                    valid=False,
-                )
-
+            # Determine provider from org list
+            provider = CloudProvider.AWS
             try:
-                data = json.loads(result.stdout)
-                provider = CloudProvider(data.get("provider", "aws"))
-                expires_at = data.get("expires_at")
-                expires_in_seconds = data.get("expires_in_seconds")
-                is_expired = data.get("is_expired", False)
+                orgs = await self.list_organizations()
+                for org in orgs:
+                    if org.get("name") == organization:
+                        provider_str = org.get("provider", "aws").lower()
+                        if provider_str == "gcp":
+                            provider = CloudProvider.GCP
+                        elif provider_str == "azure":
+                            provider = CloudProvider.AZURE
+                        break
+            except Exception:
+                pass
 
-                return TokenStatus(
-                    organization=organization,
-                    provider=provider,
-                    valid=True,
-                    expires_at=expires_at,
-                    expires_in_seconds=expires_in_seconds,
-                    is_expired=is_expired,
-                )
-            except (json.JSONDecodeError, ValueError):
-                return TokenStatus(
-                    organization=organization,
-                    provider=CloudProvider.AWS,
-                    valid=False,
-                )
+            return TokenStatus(
+                organization=organization,
+                provider=provider,
+                valid=valid,
+            )
         except Exception:
             return TokenStatus(
                 organization=organization,
@@ -396,6 +442,8 @@ class CloudctlSkill:
     async def health_check(self) -> HealthCheckResult:
         """Perform comprehensive health check on cloudctl setup.
 
+        Uses 'cloudctl doctor' for detailed diagnostics.
+
         Returns:
             HealthCheckResult with diagnostic information
         """
@@ -417,7 +465,21 @@ class CloudctlSkill:
         except Exception:
             pass
 
-        # Check credentials
+        # Run doctor command for diagnostics
+        try:
+            doctor_result = await self._execute_cloudctl(["doctor"])
+            if doctor_result.success:
+                # Parse doctor output for issues
+                doctor_output = doctor_result.stdout.lower()
+                if "everything looks good" in doctor_output or "✓" in doctor_result.stdout:
+                    result.has_credentials = True
+                    result.can_access_cloud = True
+                else:
+                    result.issues.append("cloudctl doctor reported issues")
+        except Exception as e:
+            result.warnings.append(f"Failed to run doctor: {str(e)}")
+
+        # Check organizations
         try:
             orgs = await self.list_organizations()
             result.organizations_available = len(orgs)
@@ -430,20 +492,13 @@ class CloudctlSkill:
 
                 # Try to access at least one org
                 for org in orgs:
-                    if await self.verify_credentials(org.get("name", "")):
+                    org_name = org.get("name", "")
+                    if org_name and await self.verify_credentials(org_name):
                         result.can_access_cloud = True
                         break
 
                 if not result.can_access_cloud:
                     result.warnings.append("Configured organizations found but unable to access any")
-
-                # Check token expiry for each org
-                for org in orgs:
-                    token_status = await self.get_token_status(org.get("name", ""))
-                    if token_status.expires_in_seconds and token_status.expires_in_seconds < 3600:
-                        result.warnings.append(
-                            f"{org.get('name', '')}: Token expires in {token_status.expires_in_seconds // 60} minutes"
-                        )
 
         except Exception as e:
             result.issues.append(f"Failed to check credentials: {str(e)}")
