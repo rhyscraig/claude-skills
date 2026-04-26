@@ -131,8 +131,18 @@ class ConfluenceSkill:
                     )
                     return result
 
-            # 5. Validate permissions
-            self.console.print("[cyan]5. Validating permissions...[/cyan]")
+            # 5. Validate space exists and has permissions
+            self.console.print("[cyan]5. Validating space and permissions...[/cyan]")
+            if not self.client.validate_space(doc_config.space_key):
+                result.errors.append(
+                    ValidationError(
+                        level="error",
+                        field="space",
+                        message=f"Space '{doc_config.space_key}' does not exist or is not accessible",
+                    )
+                )
+                return result
+
             if not self.client.check_write_permission(doc_config.space_key):
                 result.errors.append(
                     ValidationError(
@@ -405,6 +415,62 @@ class ConfluenceSkill:
             self.console.print(f"[yellow]Parent page not found: {doc_config.parent_page}[/yellow]")
 
         return None
+
+    def list_page_hierarchy(self, page_id: str, include_content: bool = False) -> dict:
+        """Get page with all child pages in hierarchy.
+
+        Args:
+            page_id: Page ID to get hierarchy for
+            include_content: Include page content in result
+
+        Returns:
+            Page object with 'children' array
+        """
+        page = self.client.get_page(page_id, include_body=include_content)
+        children = self.client.list_child_pages(page_id)
+        page["children"] = children
+        return page
+
+    def archive_page(self, page_id: str) -> bool:
+        """Archive a page (safe alternative to deletion).
+
+        Args:
+            page_id: Page ID to archive
+
+        Returns:
+            True if archived successfully
+        """
+        return self.client.archive_page(page_id)
+
+    def search_pages(self, space_key: str, query: str = "", limit: int = 50) -> list[dict]:
+        """Search for pages in a space.
+
+        Args:
+            space_key: Space key
+            query: Search query (title or content)
+            limit: Max results
+
+        Returns:
+            List of matching pages
+        """
+        return self.client.search_pages(space_key, query, limit)
+
+    def bulk_label_pages(self, space_key: str, query: str, labels: list[str]) -> dict:
+        """Search and label multiple pages at once.
+
+        Args:
+            space_key: Space key
+            query: Search query to find pages
+            labels: Labels to add to all matching pages
+
+        Returns:
+            Results with success/failure counts
+        """
+        pages = self.search_pages(space_key, query)
+        page_ids = [p.get("id") for p in pages if p.get("id")]
+        if not page_ids:
+            return {"success": 0, "failed": 0, "errors": []}
+        return self.client.bulk_add_labels(page_ids, labels)
 
     def _print_result_summary(self, result: DocumentGenerationResult) -> None:
         """Print result summary to console.

@@ -172,6 +172,27 @@ class ConfluenceClient:
 
         return None
 
+    def search_pages(self, space_key: str, query: str = "", limit: int = 50) -> list[dict]:
+        """Search pages by title or content.
+
+        Args:
+            space_key: Space key
+            query: Search query
+            limit: Max results
+
+        Returns:
+            List of matching pages
+        """
+        try:
+            params = {"space-key": space_key, "limit": limit}
+            if query:
+                params["title-query"] = query
+
+            response = self._request("GET", "pages", params=params)
+            return response.get("results", [])
+        except requests.HTTPError:
+            return []
+
     def get_page(self, page_id: str, include_body: bool = False) -> dict:
         """Get page by ID.
 
@@ -361,6 +382,47 @@ class ConfluenceClient:
             except requests.HTTPError as e:
                 self.console.print(f"[yellow]Warning: Could not add label '{label}': {e}[/yellow]")
 
+    def bulk_add_labels(self, page_ids: list[str], labels: list[str]) -> dict:
+        """Add labels to multiple pages.
+
+        Args:
+            page_ids: List of page IDs
+            labels: Labels to add to all pages
+
+        Returns:
+            Results with success/failure counts
+        """
+        results = {"success": 0, "failed": 0, "errors": []}
+
+        for page_id in page_ids:
+            for label in labels:
+                try:
+                    self._add_labels(page_id, [label])
+                    results["success"] += 1
+                except Exception as e:
+                    results["failed"] += 1
+                    results["errors"].append({"page_id": page_id, "label": label, "error": str(e)})
+
+        return results
+
+    def set_page_properties(self, page_id: str, properties: dict) -> bool:
+        """Set custom properties on a page.
+
+        Args:
+            page_id: Page ID
+            properties: Key-value pairs to set
+
+        Returns:
+            True if successful
+        """
+        try:
+            data = {"key": "page-properties", "value": properties}
+            self._request("PUT", f"pages/{page_id}/properties", data=data)
+            return True
+        except requests.HTTPError as e:
+            self.console.print(f"[yellow]Warning: Could not set page properties: {e}[/yellow]")
+            return False
+
     def get_page_hash(self, page_id: str) -> str:
         """Get content hash of page for change detection.
 
@@ -372,6 +434,67 @@ class ConfluenceClient:
         """
         content = self.get_page_content(page_id)
         return hashlib.md5(content.encode()).hexdigest()
+
+    def validate_space(self, space_key: str) -> bool:
+        """Validate that space exists and is accessible.
+
+        Args:
+            space_key: Space key
+
+        Returns:
+            True if space exists and is accessible
+        """
+        try:
+            self.get_space(space_key)
+            return True
+        except requests.HTTPError as e:
+            if e.response.status_code in (403, 404):
+                return False
+            raise
+
+    def list_child_pages(self, parent_page_id: str) -> list[dict]:
+        """List all child pages of a parent page.
+
+        Args:
+            parent_page_id: Parent page ID
+
+        Returns:
+            List of child page objects
+        """
+        try:
+            response = self._request(
+                "GET",
+                f"pages/{parent_page_id}/children",
+                params={"limit": 250},
+            )
+            pages = []
+            if isinstance(response, dict):
+                pages = response.get("results", [])
+            elif isinstance(response, list):
+                pages = response
+            return pages
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                return []
+            raise
+
+    def archive_page(self, page_id: str) -> bool:
+        """Archive a page instead of permanently deleting it.
+
+        Args:
+            page_id: Page ID
+
+        Returns:
+            True if archived successfully
+        """
+        data = {"status": "archived"}
+        try:
+            self._request("PUT", f"pages/{page_id}", data=data)
+            self._page_cache.clear()
+            return True
+        except requests.HTTPError as e:
+            self.console.print(f"[yellow]Warning: Could not archive page: {e}[/yellow]")
+            return False
 
     def is_page_accessible(self, page_id: str) -> bool:
         """Check if page is accessible.
