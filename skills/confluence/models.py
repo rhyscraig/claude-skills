@@ -164,6 +164,25 @@ class SkillConfig(BaseModel):
     jira: JiraConfig = Field(default_factory=JiraConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
+    def validate_required_fields(self) -> list[str]:
+        """Validate that required configuration fields are set.
+
+        Returns:
+            List of errors (empty if valid)
+        """
+        errors = []
+
+        if not self.confluence.instance_url:
+            errors.append("confluence.instance_url is required")
+        if not self.confluence.space_key:
+            errors.append("confluence.space_key is required")
+        if not self.documentation.metadata or not self.documentation.metadata.owner:
+            errors.append("documentation.metadata.owner is required")
+        if not self.documentation.metadata or not self.documentation.metadata.audience:
+            errors.append("documentation.metadata.audience must be non-empty")
+
+        return errors
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SkillConfig":
         """Load configuration from YAML file."""

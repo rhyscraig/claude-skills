@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .code_scanner import CodeScanner
-from .confluence_client import ConfluenceClient
+from .confluence_client import ConfluenceClient, InputValidator
 from .doc_generators import create_generator, DocumentTemplate
 from .guardrails import GuardailValidator, ApprovalGate
 from .jira_integration import JiraIntegration
@@ -37,7 +37,15 @@ class ConfluenceSkill:
 
         Args:
             config: Skill configuration
+
+        Raises:
+            ValueError: If configuration is invalid
         """
+        # Validate required configuration
+        config_errors = config.validate_required_fields()
+        if config_errors:
+            raise ValueError(f"Configuration errors:\n" + "\n".join(f"  - {e}" for e in config_errors))
+
         self.config = config
         self.console = Console()
         self.client = ConfluenceClient(config.confluence)
@@ -322,6 +330,9 @@ class ConfluenceSkill:
 
         Returns:
             Prepared configuration object
+
+        Raises:
+            ValueError: If configuration is invalid
         """
         if working_config is None:
             working_config = self.config
@@ -341,6 +352,11 @@ class ConfluenceSkill:
         if not config.space_key:
             config.space_key = working_config.confluence.space_key
 
+        # Validate space_key
+        valid, error = InputValidator.validate_space_key(config.space_key)
+        if not valid:
+            raise ValueError(f"Invalid space key '{config.space_key}': {error}")
+
         if parent_page_title:
             config.parent_page = parent_page_title
 
@@ -358,9 +374,24 @@ class ConfluenceSkill:
 
         Returns:
             DocumentMetadata
+
+        Raises:
+            ValueError: If title or labels are invalid
         """
         # Auto-generate title from task if needed
         title = task if doc_config.auto_title else doc_config.parent_page
+
+        # Validate title
+        valid, error = InputValidator.validate_page_title(title)
+        if not valid:
+            raise ValueError(f"Invalid document title: {error}")
+
+        # Validate labels
+        labels = doc_config.metadata.labels or []
+        if labels:
+            valid, error = InputValidator.validate_labels(labels)
+            if not valid:
+                raise ValueError(f"Invalid document labels: {error}")
 
         metadata = DocumentMetadata(
             title=title,
@@ -369,7 +400,7 @@ class ConfluenceSkill:
             owner=doc_config.metadata.owner,
             audience=doc_config.metadata.audience,
             status=doc_config.metadata.status.value if hasattr(doc_config.metadata.status, "value") else doc_config.metadata.status,
-            labels=doc_config.metadata.labels or [],
+            labels=labels,
             created_at=datetime.utcnow(),
         )
 

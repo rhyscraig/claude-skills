@@ -241,7 +241,28 @@ class ConfluenceClient:
 
         Returns:
             Created page details
+
+        Raises:
+            ValueError: If validation fails
         """
+        # Validate inputs
+        valid, error = InputValidator.validate_space_key(space_key)
+        if not valid:
+            raise ValueError(f"Invalid space key: {error}")
+
+        valid, error = InputValidator.validate_page_title(title)
+        if not valid:
+            raise ValueError(f"Invalid page title: {error}")
+
+        valid, error = InputValidator.validate_content_size(body)
+        if not valid:
+            raise ValueError(f"Content too large: {error}")
+
+        if labels:
+            valid, error = InputValidator.validate_labels(labels)
+            if not valid:
+                raise ValueError(f"Invalid labels: {error}")
+
         data = {
             "spaceId": self.get_space(space_key)["id"],
             "type": "page",
@@ -283,7 +304,24 @@ class ConfluenceClient:
 
         Returns:
             Updated page details
+
+        Raises:
+            ValueError: If validation fails
         """
+        # Validate inputs
+        valid, error = InputValidator.validate_page_title(title)
+        if not valid:
+            raise ValueError(f"Invalid page title: {error}")
+
+        valid, error = InputValidator.validate_content_size(body)
+        if not valid:
+            raise ValueError(f"Content too large: {error}")
+
+        if labels:
+            valid, error = InputValidator.validate_labels(labels)
+            if not valid:
+                raise ValueError(f"Invalid labels: {error}")
+
         page = self.get_page(page_id)
         version = page.get("version", {}).get("number", 0)
 
@@ -371,9 +409,16 @@ class ConfluenceClient:
         Args:
             page_id: Page ID
             labels: Labels to add
+
+        Raises:
+            ValueError: If labels are invalid
         """
         if not labels:
             return
+
+        valid, error = InputValidator.validate_labels(labels)
+        if not valid:
+            raise ValueError(f"Invalid labels: {error}")
 
         for label in labels:
             data = {"name": label}
@@ -391,7 +436,14 @@ class ConfluenceClient:
 
         Returns:
             Results with success/failure counts
+
+        Raises:
+            ValueError: If labels are invalid
         """
+        valid, error = InputValidator.validate_labels(labels)
+        if not valid:
+            raise ValueError(f"Invalid labels: {error}")
+
         results = {"success": 0, "failed": 0, "errors": []}
 
         for page_id in page_ids:
@@ -512,3 +564,95 @@ class ConfluenceClient:
             if e.response.status_code in (403, 404):
                 return False
             raise
+
+
+class InputValidator:
+    """Validates user input for Confluence operations."""
+
+    @staticmethod
+    def validate_space_key(space_key: str) -> tuple[bool, str]:
+        """Validate Confluence space key format.
+
+        Args:
+            space_key: Space key to validate
+
+        Returns:
+            (is_valid, error_message)
+        """
+        if not space_key:
+            return False, "Space key cannot be empty"
+        if len(space_key) > 255:
+            return False, "Space key cannot exceed 255 characters"
+        if not space_key.replace("-", "").replace("_", "").isalnum():
+            return False, "Space key can only contain alphanumerics, hyphens, and underscores"
+        return True, ""
+
+    @staticmethod
+    def validate_page_title(title: str) -> tuple[bool, str]:
+        """Validate page title.
+
+        Args:
+            title: Page title to validate
+
+        Returns:
+            (is_valid, error_message)
+        """
+        if not title or not title.strip():
+            return False, "Page title cannot be empty"
+        if len(title) > 255:
+            return False, f"Page title cannot exceed 255 characters (got {len(title)})"
+        if len(title) < 3:
+            return False, "Page title must be at least 3 characters"
+        return True, ""
+
+    @staticmethod
+    def validate_labels(labels: list[str]) -> tuple[bool, str]:
+        """Validate label list.
+
+        Args:
+            labels: Labels to validate
+
+        Returns:
+            (is_valid, error_message)
+        """
+        if not isinstance(labels, list):
+            return False, "Labels must be a list"
+        if len(labels) > 50:
+            return False, f"Cannot add more than 50 labels (got {len(labels)})"
+
+        for label in labels:
+            if not label or not label.strip():
+                return False, "Label cannot be empty"
+            if len(label) > 100:
+                return False, f"Label cannot exceed 100 characters: '{label}'"
+
+        return True, ""
+
+    @staticmethod
+    def sanitize_content_for_html(content: str) -> str:
+        """Escape HTML special characters in content.
+
+        Args:
+            content: Content to sanitize
+
+        Returns:
+            Sanitized content
+        """
+        import html
+        return html.escape(content)
+
+    @staticmethod
+    def validate_content_size(content: str, max_kb: int = 2000) -> tuple[bool, str]:
+        """Validate content size.
+
+        Args:
+            content: Content to validate
+            max_kb: Maximum size in KB
+
+        Returns:
+            (is_valid, error_message)
+        """
+        size_kb = len(content.encode("utf-8")) / 1024
+        if size_kb > max_kb:
+            return False, f"Content exceeds maximum size of {max_kb}KB (got {size_kb:.1f}KB)"
+        return True, ""

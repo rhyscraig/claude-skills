@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "claude-skills"
-version = "1.0.0"
+version = "1.2.0"
 description = "Enterprise Claude Skills for Cloud Operations (cloudctl integration, AWS, Azure, GCP)"
 authors = ["Craig Hoad <craig@craighoad.com>"]
 license = "MIT"
