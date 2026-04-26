@@ -148,6 +148,9 @@ class CloudctlSkill:
     async def login(self, organization: str) -> CommandResult:
         """Authenticate with specified organization's cloud provider.
 
+        For GCP: Automatically invokes `gcloud auth login` if not already authenticated.
+        For AWS: Uses configured SSO.
+
         Args:
             organization: Organization name to authenticate
 
@@ -162,7 +165,16 @@ class CloudctlSkill:
         if result.success:
             self.console.print(f"[green]✅ Authenticated to {organization}[/green]")
         else:
-            self.console.print(f"[red]❌ Authentication failed: {result.stderr}[/red]")
+            self.console.print(f"[red]❌ Authentication failed[/red]")
+            self.console.print(f"[dim]{result.stderr}[/dim]")
+
+            # Provide helpful guidance for GCP
+            if "gcp" in organization.lower() and "non-interactive" in result.stderr.lower():
+                self.console.print(
+                    "[yellow]💡 For GCP authentication in interactive environments:[/yellow]"
+                )
+                self.console.print(f"[cyan]   gcloud auth login[/cyan]")
+                self.console.print(f"[cyan]   cloudctl login {organization}[/cyan]")
 
         return result
 
