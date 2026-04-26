@@ -5,7 +5,7 @@ using the cloudctl CLI tool. Enables autonomous context switching, credential ma
 and multi-cloud operations.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Craig Hoad"
 __license__ = "MIT"
 
