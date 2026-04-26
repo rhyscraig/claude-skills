@@ -1,0 +1,10 @@
+documentation:
+  space_key: Engineering
+  auto_title: true
+jira:
+  enabled: true
+  instance_url: https://darkmothcreative.atlassian.net
+  auth_token_env: JIRA_TOKEN
+  default_project: TPC
+  auto_link_related: true
+  create_tasks_for_gaps: true
