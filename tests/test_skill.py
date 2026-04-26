@@ -357,6 +357,92 @@ class TestCloudctlSkillHealthAndStatus:
         """Test cloudctl installation check."""
         assert skill._cloudctl_available is True or skill._cloudctl_available is False
 
+    @pytest.mark.asyncio
+    async def test_switch_region(self, skill: CloudctlSkill) -> None:
+        """Test switching regions."""
+        context_json = {
+            "provider": "aws",
+            "organization": "myorg",
+            "region": "us-west-2",
+        }
+
+        with patch.object(skill, "_execute_cloudctl") as mock_exec:
+            mock_exec.side_effect = [
+                MagicMock(success=True, return_code=0),
+                MagicMock(success=True, stdout=json.dumps(context_json)),
+            ]
+
+            result = await skill.switch_region("us-west-2")
+            assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_switch_project(self, skill: CloudctlSkill) -> None:
+        """Test switching GCP projects."""
+        context_json = {
+            "provider": "gcp",
+            "organization": "myorg",
+            "project_id": "my-project-123",
+        }
+
+        with patch.object(skill, "_execute_cloudctl") as mock_exec:
+            mock_exec.side_effect = [
+                MagicMock(success=True, return_code=0),
+                MagicMock(success=True, stdout=json.dumps(context_json)),
+            ]
+
+            result = await skill.switch_project("my-project-123")
+            assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_check_all_credentials(self, skill: CloudctlSkill) -> None:
+        """Test checking credentials across all orgs."""
+        orgs_data = [
+            {"name": "org1", "provider": "aws"},
+            {"name": "org2", "provider": "gcp"},
+        ]
+
+        with patch.object(skill, "list_organizations") as mock_list:
+            with patch.object(skill, "verify_credentials") as mock_verify:
+                with patch.object(skill, "get_token_status") as mock_token:
+                    with patch.object(skill, "_execute_cloudctl") as mock_exec:
+                        mock_list.return_value = orgs_data
+                        mock_verify.return_value = True
+
+                        from skills.cloudctl.models import TokenStatus, CloudProvider
+
+                        mock_token.return_value = TokenStatus(
+                            organization="org1",
+                            provider=CloudProvider.AWS,
+                            valid=True,
+                            expires_in_seconds=86400,
+                            is_expired=False,
+                        )
+                        mock_exec.return_value = MagicMock(success=True)
+
+                        results = await skill.check_all_credentials()
+
+                        assert "org1" in results
+                        assert "org2" in results
+                        assert results["org1"]["valid"] is True
+
+    @pytest.mark.asyncio
+    async def test_validate_switch(self, skill: CloudctlSkill) -> None:
+        """Test context validation after switch."""
+        context_json = {
+            "provider": "aws",
+            "organization": "myorg",
+            "account_id": "123456789",
+        }
+
+        with patch.object(skill, "_execute_cloudctl") as mock_exec:
+            mock_exec.side_effect = [
+                MagicMock(success=True, stdout=json.dumps(context_json)),
+                MagicMock(success=True),
+            ]
+
+            result = await skill.validate_switch()
+            assert result is True
+
     def test_token_status_string_representation(self) -> None:
         """Test TokenStatus string representation."""
         from skills.cloudctl.models import TokenStatus, CloudProvider

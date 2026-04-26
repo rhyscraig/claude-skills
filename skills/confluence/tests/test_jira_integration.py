@@ -154,7 +154,7 @@ def test_jira_integration_find_undocumented_apis():
     with patch.dict("os.environ", {"TEST_TOKEN": "fake-token"}):
         integration = JiraIntegration(config)
 
-        # Mock the API call
+        # Mock the session and API call
         mock_response = Mock()
         mock_response.json.return_value = {
             "issues": [
@@ -165,17 +165,19 @@ def test_jira_integration_find_undocumented_apis():
                 }
             ]
         }
+        integration.client.session = Mock()
         integration.client.session.get.return_value = mock_response
 
         apis = [
             {"method": "GET", "path": "/api/users"},
-            {"method": "POST", "path": "/api/users"},
+            {"method": "POST", "path": "/api/payments"},  # This is undocumented
         ]
 
         undocumented = integration.find_undocumented_apis("TEST", apis)
 
-        # POST /api/users should be undocumented
-        assert len(undocumented) > 0
+        # POST /api/payments should be undocumented
+        assert len(undocumented) == 1
+        assert undocumented[0]["path"] == "/api/payments"
 
 
 def test_jira_integration_generate_jira_section():
@@ -189,7 +191,7 @@ def test_jira_integration_generate_jira_section():
     with patch.dict("os.environ", {"TEST_TOKEN": "fake-token"}):
         integration = JiraIntegration(config)
 
-        # Mock the API call
+        # Mock the session and API call
         mock_response = Mock()
         mock_response.json.return_value = {
             "issues": [
@@ -203,6 +205,7 @@ def test_jira_integration_generate_jira_section():
                 }
             ]
         }
+        integration.client.session = Mock()
         integration.client.session.get.return_value = mock_response
 
         html = integration.generate_jira_section("TEST", "payment")
