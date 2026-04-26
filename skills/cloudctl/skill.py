@@ -7,7 +7,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from rich.console import Console
 from rich.syntax import Syntax
@@ -219,7 +219,7 @@ class CloudctlSkill:
             project_id=data.get("project_id"),
         )
 
-    async def list_organizations(self) -> list[dict]:
+    async def list_organizations(self) -> list[dict[str, str]]:
         """List all configured organizations.
 
         Parses plaintext output from 'cloudctl org list'.
@@ -263,7 +263,7 @@ class CloudctlSkill:
 
         return orgs
 
-    async def list_accounts(self, organization: str) -> list[dict]:
+    async def list_accounts(self, organization: str) -> list[dict[str, str]]:
         """List accounts for organization.
 
         Parses plaintext output from 'cloudctl accounts <org>'.
@@ -388,7 +388,7 @@ class CloudctlSkill:
                 valid=False,
             )
 
-    async def check_all_credentials(self) -> dict:
+    async def check_all_credentials(self) -> dict[str, dict[str, Any]]:
         """Check credentials and token status across all organizations.
 
         Returns:
@@ -690,7 +690,7 @@ class CloudctlSkill:
         organization: str,
         account_id: Optional[str] = None,
         role: Optional[str] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Guarantee cloud access with comprehensive pre-flight checks and auto-recovery.
 
         This is the recommended entry point for Claude sessions. Ensures:

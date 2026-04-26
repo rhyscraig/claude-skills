@@ -1,0 +1,152 @@
+# Cloud Context & Operations Skill Configuration
+#
+# This example shows all available configuration options.
+# Copy this file to .cloudctl.yaml and customize for your environment.
+#
+# Configuration Priority (later overrides earlier):
+# 1. Environment variables (CLOUDCTL_*)
+# 2. Central config file (~/.cloudctl/config.yaml)
+# 3. Local repo config (.cloudctl.yaml)
+# 4. Runtime parameters (when calling skill methods)
+
+# === Core Settings ===
+cloudctl:
+  # Path to cloudctl binary (default: cloudctl)
+  # Leave as-is to use cloudctl from PATH
+  # Set to absolute path to use specific version
+  path: "cloudctl"
+
+  # Command timeout in seconds (min: 1, max: 300, default: 30)
+  # Increase for slow networks or large operations
+  timeout_seconds: 30
+
+  # Maximum retry attempts for transient errors (min: 0, max: 10, default: 3)
+  # Set to 0 to disable retries
+  # Applies to timeout and token refresh failures
+  max_retries: 3
+
+  # Verify context after switch operations (default: true)
+  # Recommended: keep true for safety
+  verify_context_after_switch: true
+
+  # Enable audit logging to ~/.config/cloudctl/audit/ (default: true)
+  # Logs all operations in JSONL format for compliance and debugging
+  enable_audit_logging: true
+
+  # Dry-run mode (default: false)
+  # When true, shows what would happen without executing
+  # Useful for testing and validation
+  dry_run: false
+
+# === Environment Variable Overrides ===
+# These override system environment variables during cloudctl execution
+# Useful for multi-tenant environments or special configurations
+environment_overrides:
+  # AWS Configuration
+  # AWS_REGION: "eu-west-2"
+  # AWS_PROFILE: "production"
+  # AWS_ROLE_SESSION_NAME: "claude-session"
+
+  # GCP Configuration
+  # GCLOUD_PROJECT: "my-project-id"
+  # GOOGLE_CLOUD_PROJECT: "my-project-id"
+  # CLOUDSDK_CORE_REGION: "us-central1"
+
+  # Azure Configuration
+  # AZURE_SUBSCRIPTION_ID: "xxx"
+  # AZURE_DEFAULTS_GROUP: "my-resource-group"
+
+# === Advanced Settings ===
+# Uncomment to enable logging to file
+# logging:
+#   enabled: true
+#   level: "DEBUG"
+#   format: "json"
+#   file: "~/.config/cloudctl/skill.log"
+
+# === Organization-Specific Settings ===
+# Customize per organization (optional)
+# organizations:
+#   myorg:
+#     timeout_seconds: 60
+#     verify_context_after_switch: true
+#     dry_run: false
+#
+#   gcp-terrorgems:
+#     timeout_seconds: 45
+#     verify_context_after_switch: true
+#     dry_run: false
+
+# === Performance Tuning ===
+# Cache settings (optional)
+# cache:
+#   enabled: true
+#   ttl_seconds: 300      # Cache entry lifetime
+#   max_entries: 100      # Maximum cached contexts
+
+# === Feature Flags ===
+features:
+  # Enable automatic token refresh before expiry (default: true)
+  auto_refresh_tokens: true
+
+  # Enable context caching for performance (default: true)
+  context_caching: true
+
+  # Enable detailed error messages (default: true)
+  detailed_errors: true
+
+  # Enable rich console output with colors/emojis (default: true)
+  rich_output: true
+
+# === Security Settings ===
+security:
+  # Minimum token lifetime before refresh (seconds)
+  min_token_lifetime: 300
+
+  # Log sensitive operations (account/role changes)
+  audit_sensitive_operations: true
+
+  # Mask sensitive data in logs
+  mask_sensitive_data: true
+
+# === Examples by Use Case ===
+
+# --- Example 1: Local Development ---
+# Use this for development with loose timeout/retry settings
+# cloudctl:
+#   timeout_seconds: 60
+#   max_retries: 5
+#   enable_audit_logging: true
+#   dry_run: false
+
+# --- Example 2: CI/CD Pipeline ---
+# Use this for automated deployments with strict settings
+# cloudctl:
+#   timeout_seconds: 30
+#   max_retries: 1
+#   enable_audit_logging: true
+#   verify_context_after_switch: true
+#   dry_run: false
+#
+# features:
+#   auto_refresh_tokens: true
+#   context_caching: true
+#   detailed_errors: true
+
+# --- Example 3: Multi-Cloud Setup ---
+# Use this for hybrid AWS/GCP environments
+# cloudctl:
+#   timeout_seconds: 45
+#   max_retries: 3
+#   enable_audit_logging: true
+#
+# environment_overrides:
+#   AWS_REGION: "eu-west-2"
+#   GCLOUD_PROJECT: "my-gcp-project"
+
+# --- Example 4: Dry-Run / Testing ---
+# Use this to test operations without making changes
+# cloudctl:
+#   dry_run: true
+#   timeout_seconds: 30
+#   verify_context_after_switch: true

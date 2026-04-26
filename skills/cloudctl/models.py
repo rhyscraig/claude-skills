@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CloudProvider(str, Enum):
@@ -27,16 +27,14 @@ class CommandStatus(str, Enum):
 class CommandResult(BaseModel):
     """Result of a cloudctl command execution."""
 
+    model_config = ConfigDict(use_enum_values=False)
+
     status: CommandStatus
     return_code: int
     stdout: str = ""
     stderr: str = ""
     command: str
     duration_seconds: float = 0.0
-
-    class Config:
-        use_enum_values = False
-        json_encoders = {CommandStatus: lambda v: v.value}
 
     @property
     def success(self) -> bool:
@@ -52,6 +50,8 @@ class CommandResult(BaseModel):
 class CloudContext(BaseModel):
     """Current cloud context state."""
 
+    model_config = ConfigDict(use_enum_values=False)
+
     provider: CloudProvider
     organization: str
     account_id: Optional[str] = None
@@ -59,7 +59,8 @@ class CloudContext(BaseModel):
     region: Optional[str] = None
     project_id: Optional[str] = None
 
-    @validator("organization")
+    @field_validator("organization")
+    @classmethod
     def validate_org(cls, v: str) -> str:
         """Validate organization name."""
         if not v or len(v.strip()) == 0:
@@ -67,10 +68,6 @@ class CloudContext(BaseModel):
         if len(v) > 255:
             raise ValueError("Organization name too long")
         return v.strip()
-
-    class Config:
-        use_enum_values = False
-        json_encoders = {CloudProvider: lambda v: v.value}
 
     def __str__(self) -> str:
         """Human-readable representation."""
@@ -89,6 +86,8 @@ class CloudContext(BaseModel):
 class SkillConfig(BaseModel):
     """Configuration for cloudctl skill."""
 
+    model_config = ConfigDict(validate_assignment=True)
+
     cloudctl_path: str = "cloudctl"
     timeout_seconds: int = 30
     max_retries: int = 3
@@ -97,22 +96,21 @@ class SkillConfig(BaseModel):
     dry_run: bool = False
     environment_overrides: dict[str, str] = Field(default_factory=dict)
 
-    @validator("timeout_seconds")
+    @field_validator("timeout_seconds")
+    @classmethod
     def validate_timeout(cls, v: int) -> int:
         """Validate timeout value."""
         if v < 1 or v > 300:
             raise ValueError("Timeout must be between 1 and 300 seconds")
         return v
 
-    @validator("max_retries")
+    @field_validator("max_retries")
+    @classmethod
     def validate_retries(cls, v: int) -> int:
         """Validate retry count."""
         if v < 0 or v > 10:
             raise ValueError("Max retries must be between 0 and 10")
         return v
-
-    class Config:
-        validate_assignment = True
 
     @classmethod
     def from_env(cls) -> "SkillConfig":
@@ -132,6 +130,8 @@ class SkillConfig(BaseModel):
 class OperationLog(BaseModel):
     """Audit log entry for operations."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     timestamp: str
     operation: str
     context_before: Optional[CloudContext] = None
@@ -140,9 +140,6 @@ class OperationLog(BaseModel):
     user: Optional[str] = None
     success: bool
     notes: str = ""
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class TokenStatus(BaseModel):
