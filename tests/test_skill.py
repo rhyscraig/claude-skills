@@ -426,6 +426,109 @@ class TestCloudctlSkillHealthAndStatus:
                         assert results["org1"]["valid"] is True
 
     @pytest.mark.asyncio
+    async def test_ensure_cloud_access_success(self, skill: CloudctlSkill) -> None:
+        """Test ensure_cloud_access with full success path."""
+        context_json = {
+            "provider": "aws",
+            "organization": "myorg",
+            "account_id": "123456789",
+            "role": "admin",
+        }
+        orgs_data = [{"name": "myorg", "provider": "aws"}]
+
+        with patch.object(skill, "list_organizations") as mock_list:
+            with patch.object(skill, "get_token_status") as mock_token:
+                with patch.object(skill, "switch_context") as mock_switch:
+                    with patch.object(skill, "validate_switch") as mock_validate:
+                        with patch.object(skill, "get_context") as mock_context:
+                            from skills.cloudctl.models import TokenStatus, CloudProvider
+
+                            mock_list.return_value = orgs_data
+                            mock_token.return_value = TokenStatus(
+                                organization="myorg",
+                                provider=CloudProvider.AWS,
+                                valid=True,
+                                expires_in_seconds=86400,
+                                is_expired=False,
+                            )
+                            mock_switch.return_value = MagicMock(success=True)
+                            mock_validate.return_value = True
+                            mock_context.return_value = MagicMock(
+                                __str__=lambda self: "aws:myorg account=123456789"
+                            )
+
+                            result = await skill.ensure_cloud_access("myorg", "123456789", "admin")
+
+                            assert result["success"] is True
+                            assert result["org"] == "myorg"
+                            assert result["account"] == "123456789"
+
+    @pytest.mark.asyncio
+    async def test_ensure_cloud_access_cloudctl_missing(self) -> None:
+        """Test ensure_cloud_access when cloudctl is not installed."""
+        from skills.cloudctl.models import SkillConfig
+
+        config = SkillConfig(cloudctl_path="/nonexistent/cloudctl")
+        skill = CloudctlSkill(config=config)
+
+        result = await skill.ensure_cloud_access("myorg")
+
+        assert result["success"] is False
+        assert "not found" in result["error"].lower()
+        assert "fix" in result
+
+    @pytest.mark.asyncio
+    async def test_ensure_cloud_access_org_not_found(self, skill: CloudctlSkill) -> None:
+        """Test ensure_cloud_access when org doesn't exist."""
+        with patch.object(skill, "list_organizations") as mock_list:
+            mock_list.return_value = [{"name": "staging", "provider": "aws"}]
+
+            result = await skill.ensure_cloud_access("nonexistent")
+
+            assert result["success"] is False
+            assert "not found" in result["error"].lower()
+            assert "staging" in result.get("available_orgs", [])
+
+    @pytest.mark.asyncio
+    async def test_ensure_cloud_access_token_expired(self, skill: CloudctlSkill) -> None:
+        """Test ensure_cloud_access auto-refreshes expired tokens."""
+        context_json = {
+            "provider": "aws",
+            "organization": "myorg",
+            "account_id": "123456789",
+        }
+        orgs_data = [{"name": "myorg", "provider": "aws"}]
+
+        with patch.object(skill, "list_organizations") as mock_list:
+            with patch.object(skill, "get_token_status") as mock_token:
+                with patch.object(skill, "login") as mock_login:
+                    with patch.object(skill, "switch_context") as mock_switch:
+                        with patch.object(skill, "validate_switch") as mock_validate:
+                            with patch.object(skill, "get_context") as mock_context:
+                                from skills.cloudctl.models import TokenStatus, CloudProvider
+
+                                mock_list.return_value = orgs_data
+                                mock_token.return_value = TokenStatus(
+                                    organization="myorg",
+                                    provider=CloudProvider.AWS,
+                                    valid=True,
+                                    expires_in_seconds=0,
+                                    is_expired=True,
+                                )
+                                mock_login.return_value = MagicMock(success=True)
+                                mock_switch.return_value = MagicMock(success=True)
+                                mock_validate.return_value = True
+                                mock_context.return_value = MagicMock(
+                                    __str__=lambda self: "aws:myorg"
+                                )
+
+                                result = await skill.ensure_cloud_access("myorg")
+
+                                assert result["success"] is True
+                                # Verify login was called to refresh
+                                mock_login.assert_called_once_with("myorg")
+
+    @pytest.mark.asyncio
     async def test_validate_switch(self, skill: CloudctlSkill) -> None:
         """Test context validation after switch."""
         context_json = {

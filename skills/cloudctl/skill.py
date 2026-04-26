@@ -601,6 +601,124 @@ class CloudctlSkill:
 
         return False
 
+    async def ensure_cloud_access(
+        self,
+        organization: str,
+        account_id: Optional[str] = None,
+        role: Optional[str] = None,
+    ) -> dict:
+        """Guarantee cloud access with comprehensive pre-flight checks and auto-recovery.
+
+        This is the recommended entry point for Claude sessions. Ensures:
+        - cloudctl is installed and accessible
+        - credentials exist and are valid
+        - tokens are not expired (auto-refreshes if needed)
+        - context switch succeeds
+        - final context is validated
+
+        Args:
+            organization: Organization name
+            account_id: AWS account ID or GCP project ID (optional)
+            role: IAM role (optional)
+
+        Returns:
+            Dict with success flag and either context or error details.
+        """
+        try:
+            # Step 1: Health check
+            if not self._cloudctl_available:
+                return {
+                    "success": False,
+                    "error": f"cloudctl not found at {self.config.cloudctl_path}",
+                    "fix": "Install cloudctl with: pip install cloudctl",
+                }
+
+            # Step 2: Validate org
+            if not organization or not organization.strip():
+                return {
+                    "success": False,
+                    "error": "Organization name is required",
+                    "fix": "Provide a valid organization name",
+                }
+
+            # Step 3: Check org exists
+            try:
+                all_orgs = await self.list_organizations()
+                org_names = [o.get("name", "") for o in all_orgs]
+                if organization not in org_names:
+                    return {
+                        "success": False,
+                        "error": f"Organization '{organization}' not found",
+                        "available_orgs": org_names,
+                        "fix": "Use one of the available organizations listed above",
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to list organizations: {str(e)}",
+                    "fix": "Check that cloudctl is properly configured",
+                }
+
+            # Step 4: Check token and auto-refresh
+            token_status = await self.get_token_status(organization)
+            if token_status.is_expired:
+                self.console.print(
+                    f"[yellow]⏰ Token expired for {organization}, attempting refresh...[/yellow]"
+                )
+                login_result = await self.login(organization)
+                if not login_result.success:
+                    return {
+                        "success": False,
+                        "error": f"Token expired and refresh failed",
+                        "fix": f"Run 'cloudctl login {organization}' manually",
+                    }
+
+            # Step 5: Switch context
+            result = await self.switch_context(organization, account_id, role)
+            if not result.success:
+                return {
+                    "success": False,
+                    "error": f"Failed to switch context: {result.stderr}",
+                    "fix": "Check org name and account/role are valid",
+                }
+
+            # Step 6: Validate switch
+            is_valid = await self.validate_switch()
+            if not is_valid:
+                return {
+                    "success": False,
+                    "error": "Context switch validation failed",
+                    "fix": f"Try manually: cloudctl switch {organization}",
+                }
+
+            # Step 7: Get final context
+            try:
+                context = await self.get_context()
+                self._context_cache = context
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to get final context: {str(e)}",
+                    "fix": "Context may have switched - try the operation anyway",
+                }
+
+            self.console.print(f"[green]✅ Ready: {context}[/green]")
+            return {
+                "success": True,
+                "org": organization,
+                "account": account_id,
+                "role": role,
+                "context": str(context),
+                "token_expires_in": token_status.expires_in_seconds,
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}",
+                "fix": "Check logs and try again",
+            }
+
     def log_operation(
         self,
         operation: str,
