@@ -45,18 +45,29 @@ class CloudctlSkill:
         account_id: Optional[str] = None,
         role: Optional[str] = None,
     ) -> CommandResult:
-        """Switch cloud context to specified organization/account/role.
+        """Switch cloud context to specified organization.
+
+        NOTE: cloudctl v4.0.0 requires interactive selection for account/role.
+        This method switches to the organization; select account/role interactively
+        via 'cloudctl switch <org>' or use 'cloudctl env <org>' to verify access.
 
         Args:
             organization: Organization name
-            account_id: AWS account ID or GCP project ID
-            role: IAM role or GCP role
+            account_id: (Deprecated - not supported in cloudctl v4.0.0) AWS account ID or GCP project ID
+            role: (Deprecated - not supported in cloudctl v4.0.0) IAM role or GCP role
 
         Returns:
             CommandResult with switch operation status
         """
         if not organization:
             raise ValueError("Organization is required")
+
+        if account_id or role:
+            self.console.print(
+                "[yellow]⚠️  account_id and role parameters are not supported in cloudctl v4.0.0[/yellow]"
+            )
+            self.console.print(f"[yellow]   Run: cloudctl switch {organization}[/yellow]")
+            self.console.print("[yellow]   Then select account and role interactively[/yellow]")
 
         # Log current context before switch
         try:
@@ -65,18 +76,24 @@ class CloudctlSkill:
         except Exception:
             pass
 
+        # cloudctl v4.0.0 only accepts organization name for switch
         cmd_parts = ["switch", organization]
-        if account_id:
-            cmd_parts.append(account_id)
-        if role:
-            cmd_parts.append(role)
+
+        # Note: account_id and role are intentionally not appended
+        # They require interactive input in cloudctl v4.0.0
 
         result = await self._execute_cloudctl(cmd_parts)
 
         if result.success and self.config.verify_context_after_switch:
-            context = await self.get_context()
-            self._context_cache = context
-            self.console.print(f"[green]✅ Switched to: {context}[/green]")
+            try:
+                context = await self.get_context()
+                self._context_cache = context
+                self.console.print(f"[green]✅ Switched to: {context}[/green]")
+            except Exception:
+                # Context verification may fail due to interactive selection requirement
+                self.console.print(
+                    "[cyan]ℹ️  Context requires interactive selection - run: cloudctl switch {organization}[/cyan]"
+                )
         elif not result.success:
             self.console.print(f"[red]❌ Context switch failed: {result.stderr}[/red]")
 
